@@ -1,4 +1,5 @@
 import gleam/erlang/process
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import joblot/lock
@@ -27,7 +28,7 @@ pub fn start(job_id: JobId, db: process.Name(pog.Message)) {
           LockExited(pid, reason)
         })
 
-      actor.initialised(Uninitialized(job_id, db))
+      actor.initialised(State(job_id, db, None))
       |> actor.selecting(selector)
       |> actor.returning(subject)
       |> Ok
@@ -43,21 +44,7 @@ pub fn start(job_id: JobId, db: process.Name(pog.Message)) {
 }
 
 type State {
-  Uninitialized(job_id: JobId, db: process.Name(pog.Message))
-  Initialized(job_id: JobId, lock: lock.Lock, db: process.Name(pog.Message))
-}
-
-fn initialized_to_data(state: State) -> InitializedState {
-  let assert Initialized(job_id, lock, db) = state
-  Data(job_id, lock, db)
-}
-
-type InitializedState {
-  Data(job_id: JobId, lock: lock.Lock, db: process.Name(pog.Message))
-}
-
-fn data_to_initialized(state: InitializedState) -> State {
-  Initialized(state.job_id, state.lock, state.db)
+  State(job_id: JobId, db: process.Name(pog.Message), lock: Option(lock.Lock))
 }
 
 pub type Message {
@@ -68,15 +55,14 @@ pub type Message {
 
 fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {
   case state {
-    Uninitialized(job_id, db) ->
+    State(job_id, db, None) ->
       case message {
         Initialize -> initialize(job_id, db)
         _ -> actor.stop_abnormal("Invalid message")
       }
-    Initialized(_, lock, _) ->
+    State(_, _, Some(lock)) ->
       case message {
-        LockExited(pid, reason) ->
-          handle_lock_exited(initialized_to_data(state), pid, reason)
+        LockExited(pid, reason) -> handle_lock_exited(state, pid, reason)
         Initialize -> actor.continue(state)
         Exit -> {
           lock.exit_lock(lock)
@@ -98,9 +84,7 @@ fn initialize(
 
     lock.monitor_lock(lock)
 
-    let data = Data(job_id, lock, db)
-
-    Ok(data_to_initialized(data))
+    Ok(State(job_id, db, Some(lock)))
   }
 
   case state_result {
@@ -112,7 +96,7 @@ fn initialize(
 }
 
 fn handle_lock_exited(
-  data: InitializedState,
+  data: State,
   pid: process.Pid,
   reason: process.ExitReason,
 ) -> actor.Next(State, Message) {
@@ -129,7 +113,7 @@ fn handle_lock_exited(
 
       case restart_result {
         Ok(lock) -> {
-          actor.continue(data_to_initialized(Data(..data, lock: lock)))
+          actor.continue(State(..data, lock: Some(lock)))
         }
         Error(_) -> {
           actor.stop_abnormal("Failed to restart lock")

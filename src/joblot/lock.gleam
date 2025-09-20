@@ -1,5 +1,6 @@
 import glanoid
 import gleam/erlang/process
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/result
 import gleam/time/timestamp
@@ -23,7 +24,7 @@ pub fn start_lock(id: String, db: process.Name(pog.Message)) {
       let nonce = nanoid(21)
 
       let initial_state =
-        State(subject, db, id, nonce, True)
+        State(subject, db, id, nonce, False)
         |> try_acquire_lock
 
       let initialised =
@@ -43,19 +44,26 @@ pub fn monitor_lock(lock: Lock) {
 }
 
 pub fn restart_lock(
-  lock: Lock,
+  lock: Option(Lock),
   exited_pid: process.Pid,
   id: String,
   db: process.Name(pog.Message),
 ) -> Result(Lock, actor.StartError) {
-  case lock.pid == exited_pid {
-    True -> {
-      process.send(lock.subject, Exit)
-      use new_lock <- result.try(start_lock(id, db))
-      monitor_lock(new_lock)
-      Ok(new_lock)
+  let restart_lock = fn() {
+    use new_lock <- result.try(start_lock(id, db))
+    monitor_lock(new_lock)
+    Ok(new_lock)
+  }
+
+  case lock {
+    None -> {
+      restart_lock()
     }
-    False -> {
+    Some(lock) if lock.pid == exited_pid -> {
+      process.send(lock.subject, Exit)
+      restart_lock()
+    }
+    Some(lock) -> {
       Ok(lock)
     }
   }
