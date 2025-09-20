@@ -1,0 +1,1 @@
+select * from locks where id = $1;

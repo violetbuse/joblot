@@ -1,0 +1,1 @@
+update locks set expires_at = $3 where id = $1 and nonce = $2 returning *;
