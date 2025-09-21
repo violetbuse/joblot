@@ -5,7 +5,6 @@
 ////
 
 import gleam/dynamic/decode
-import gleam/option.{type Option}
 import pog
 
 /// Runs the `clear_locks` query
@@ -23,77 +22,6 @@ pub fn clear_locks(
   "delete from locks where expires_at < $1;"
   |> pog.query
   |> pog.parameter(pog.int(arg_1))
-  |> pog.returning(decoder)
-  |> pog.execute(db)
-}
-
-/// A row you get from running the `find_crons` query
-/// defined in `./src/joblot/sql/find_crons.sql`.
-///
-/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
-/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
-///
-pub type FindCronsRow {
-  FindCronsRow(
-    id: String,
-    hash: Int,
-    metadata: String,
-    user_id: Option(String),
-    tenant_id: Option(String),
-    cron: String,
-    created_at: Int,
-    method: String,
-    url: String,
-    headers: Option(List(String)),
-    body: Option(String),
-    timeout_ms: Int,
-  )
-}
-
-/// Runs the `find_crons` query
-/// defined in `./src/joblot/sql/find_crons.sql`.
-///
-/// > 🐿️ This function was generated automatically using v4.4.1 of
-/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
-///
-pub fn find_crons(
-  db: pog.Connection,
-  arg_1: Int,
-  arg_2: Int,
-) -> Result(pog.Returned(FindCronsRow), pog.QueryError) {
-  let decoder = {
-    use id <- decode.field(0, decode.string)
-    use hash <- decode.field(1, decode.int)
-    use metadata <- decode.field(2, decode.string)
-    use user_id <- decode.field(3, decode.optional(decode.string))
-    use tenant_id <- decode.field(4, decode.optional(decode.string))
-    use cron <- decode.field(5, decode.string)
-    use created_at <- decode.field(6, decode.int)
-    use method <- decode.field(7, decode.string)
-    use url <- decode.field(8, decode.string)
-    use headers <- decode.field(9, decode.optional(decode.list(decode.string)))
-    use body <- decode.field(10, decode.optional(decode.string))
-    use timeout_ms <- decode.field(11, decode.int)
-    decode.success(FindCronsRow(
-      id:,
-      hash:,
-      metadata:,
-      user_id:,
-      tenant_id:,
-      cron:,
-      created_at:,
-      method:,
-      url:,
-      headers:,
-      body:,
-      timeout_ms:,
-    ))
-  }
-
-  "select * from cron_jobs where hash % $1 = $2;"
-  |> pog.query
-  |> pog.parameter(pog.int(arg_1))
-  |> pog.parameter(pog.int(arg_2))
   |> pog.returning(decoder)
   |> pog.execute(db)
 }
@@ -191,6 +119,87 @@ pub fn release_lock(
   |> pog.query
   |> pog.parameter(pog.text(arg_1))
   |> pog.parameter(pog.text(arg_2))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}
+
+/// A row you get from running the `scan_cron` query
+/// defined in `./src/joblot/sql/scan_cron.sql`.
+///
+/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
+/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub type ScanCronRow {
+  ScanCronRow(id: String)
+}
+
+/// Runs the `scan_cron` query
+/// defined in `./src/joblot/sql/scan_cron.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn scan_cron(
+  db: pog.Connection,
+  arg_1: String,
+  arg_2: Int,
+) -> Result(pog.Returned(ScanCronRow), pog.QueryError) {
+  let decoder = {
+    use id <- decode.field(0, decode.string)
+    decode.success(ScanCronRow(id:))
+  }
+
+  "SELECT id FROM cron_jobs
+    WHERE
+        id > $1
+    ORDER BY id ASC
+    LIMIT $2;"
+  |> pog.query
+  |> pog.parameter(pog.text(arg_1))
+  |> pog.parameter(pog.int(arg_2))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}
+
+/// A row you get from running the `scan_one_off_jobs` query
+/// defined in `./src/joblot/sql/scan_one_off_jobs.sql`.
+///
+/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
+/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub type ScanOneOffJobsRow {
+  ScanOneOffJobsRow(id: String)
+}
+
+/// Runs the `scan_one_off_jobs` query
+/// defined in `./src/joblot/sql/scan_one_off_jobs.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn scan_one_off_jobs(
+  db: pog.Connection,
+  arg_1: Int,
+  arg_2: String,
+  arg_3: Int,
+) -> Result(pog.Returned(ScanOneOffJobsRow), pog.QueryError) {
+  let decoder = {
+    use id <- decode.field(0, decode.string)
+    decode.success(ScanOneOffJobsRow(id:))
+  }
+
+  "SELECT id FROM one_off_jobs 
+    WHERE 
+        maximum_retries + 1 > attempts AND 
+        execute_at <= $1 AND 
+        executed_at IS NULL AND
+        id > $2
+    ORDER BY id ASC
+    LIMIT $3;"
+  |> pog.query
+  |> pog.parameter(pog.int(arg_1))
+  |> pog.parameter(pog.text(arg_2))
+  |> pog.parameter(pog.int(arg_3))
   |> pog.returning(decoder)
   |> pog.execute(db)
 }

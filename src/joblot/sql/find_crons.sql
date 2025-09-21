@@ -1,1 +1,0 @@
-select * from cron_jobs where hash % $1 = $2;

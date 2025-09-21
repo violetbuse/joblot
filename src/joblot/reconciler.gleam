@@ -1,8 +1,8 @@
 import gleam/erlang/process
+import gleam/int
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/set
-import gleam/time/duration
 import gleam/time/timestamp
 import joblot/registry.{type Message as RegistryMessage}
 import joblot/target.{type Message as TargetMessage}
@@ -71,6 +71,7 @@ fn reconcile(state: State) -> actor.Next(State, Message) {
     registry.remove_instance(state.registry, job_id)
   })
 
+  process.sleep(995)
   let time_to_next_reconcile = time_to_next_reconcile(state.last_reconciled)
   process.send_after(state.self, time_to_next_reconcile, Reconcile)
 
@@ -79,18 +80,23 @@ fn reconcile(state: State) -> actor.Next(State, Message) {
 }
 
 fn time_to_next_reconcile(last_reconciled: timestamp.Timestamp) -> Int {
-  let time_since_last_reconciled =
-    timestamp.difference(timestamp.system_time(), last_reconciled)
+  let last_reconciled =
+    timestamp.to_unix_seconds_and_nanoseconds(last_reconciled)
+  let last_reconciled_in_milliseconds =
+    last_reconciled.0 * 1000 + last_reconciled.1 / 1_000_000
+
+  let current_time =
+    timestamp.to_unix_seconds_and_nanoseconds(timestamp.system_time())
+  let current_time_in_milliseconds =
+    current_time.0 * 1000 + current_time.1 / 1_000_000
+
+  let earliest_next_reconcile =
+    last_reconciled_in_milliseconds + heartbeat_interval
+  let target_next_reconcile = current_time_in_milliseconds + 100
+
   let time_to_next_reconcile =
-    duration.difference(
-      duration.milliseconds(heartbeat_interval),
-      time_since_last_reconciled,
-    )
+    int.max(earliest_next_reconcile, target_next_reconcile)
+    - current_time_in_milliseconds
 
-  let #(seconds, nanoseconds) =
-    duration.to_seconds_and_nanoseconds(time_to_next_reconcile)
-
-  let milliseconds = seconds * 1000 + nanoseconds / 1_000_000
-
-  milliseconds
+  time_to_next_reconcile
 }
