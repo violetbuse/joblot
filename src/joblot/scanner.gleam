@@ -51,8 +51,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
 }
 
 fn scan(state: State) -> actor.Next(State, Message) {
-  todo
-  "actually scan and put into target"
+  todo as "actually scan and put into target"
 
   let time_to_next_scan = time_to_next_scan(state.last_scanned)
   process.send_after(state.self, time_to_next_scan, Scan)
