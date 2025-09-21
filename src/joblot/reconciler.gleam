@@ -4,12 +4,15 @@ import gleam/otp/supervision
 import joblot/registry.{type Message as RegistryMessage}
 import joblot/target.{type Message as TargetMessage}
 
+const heartbeat_interval = 10_000
+
 pub fn start_reconciler(
-  name: process.Name(Message),
   target target: process.Name(TargetMessage),
   registry registry: process.Name(RegistryMessage),
 ) {
   actor.new_with_initialiser(5000, fn(subject) {
+    process.send(subject, Heartbeat)
+
     let target_subject = process.named_subject(target)
     let registry_subject = process.named_subject(registry)
 
@@ -19,19 +22,19 @@ pub fn start_reconciler(
     Ok(initialised)
   })
   |> actor.on_message(handle_message)
-  |> actor.named(name)
   |> actor.start
 }
 
 pub fn supervised(
-  name: process.Name(Message),
   target target: process.Name(TargetMessage),
   registry registry: process.Name(RegistryMessage),
 ) {
-  supervision.worker(fn() { start_reconciler(name, target, registry) })
+  supervision.worker(fn() { start_reconciler(target, registry) })
 }
 
-pub opaque type Message
+pub opaque type Message {
+  Heartbeat
+}
 
 type State {
   State(

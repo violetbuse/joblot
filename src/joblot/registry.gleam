@@ -65,6 +65,7 @@ pub opaque type Message {
   TestInstances
   AddInstance(instance.JobId)
   RemoveInstance(instance.JobId)
+  ListInstances(reply_to: process.Subject(List(instance.JobId)))
 }
 
 fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {
@@ -73,6 +74,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
     TestInstances -> handle_test_instances(state)
     AddInstance(job_id) -> handle_add_instance(state, job_id)
     RemoveInstance(job_id) -> handle_remove_instance(state, job_id)
+    ListInstances(reply_to) -> handle_list_instances(state, reply_to)
   }
 }
 
@@ -232,4 +234,13 @@ fn handle_remove_instance(
   actor.continue(
     State(..state, instances: new_instances_dict, jobid_index: new_jobid_index),
   )
+}
+
+fn handle_list_instances(
+  state: State,
+  reply_to: process.Subject(List(instance.JobId)),
+) -> actor.Next(State, Message) {
+  let job_ids = dict.keys(state.jobid_index)
+  process.send(reply_to, job_ids)
+  actor.continue(state)
 }

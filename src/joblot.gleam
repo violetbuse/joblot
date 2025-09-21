@@ -5,9 +5,10 @@ import gleam/erlang/process
 import gleam/io
 import gleam/otp/static_supervisor as supervisor
 import joblot/api
-import joblot/lock as lock_manager
+import joblot/lock
 import joblot/reconciler
 import joblot/registry
+import joblot/scanner
 import joblot/target
 import pog
 
@@ -20,7 +21,6 @@ pub fn main() {
   let pool_name = process.new_name("pool")
   let target_name = process.new_name("target")
   let registry_name = process.new_name("registry")
-  let reconciler_name = process.new_name("reconciler")
   let lock_manager_name = process.new_name("lock_manager")
 
   let db_url =
@@ -38,22 +38,19 @@ pub fn main() {
   let assert Ok(_) =
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(pool_child)
-    |> supervisor.add(api.supervised())
+    |> supervisor.add(api.supervised(pool_name))
     |> supervisor.add(target.supervised(target_name))
     |> supervisor.add(registry.supervised(
       registry_name,
       pool_name,
       lock_manager_name,
     ))
-    |> supervisor.add(lock_manager.lock_manager_supervised(
-      lock_manager_name,
-      pool_name,
-    ))
+    |> supervisor.add(lock.lock_manager_supervised(lock_manager_name, pool_name))
     |> supervisor.add(reconciler.supervised(
-      reconciler_name,
       target: target_name,
       registry: registry_name,
     ))
+    |> supervisor.add(scanner.supervised(pool_name, target_name))
     |> supervisor.start
 
   process.sleep_forever()
