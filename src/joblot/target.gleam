@@ -29,7 +29,7 @@ pub fn supervised(name: process.Name(Message)) {
 pub opaque type Message {
   AddJob(JobId)
   RemoveJob(JobId)
-  ListJobs(reply_to: process.Subject(List(JobId)))
+  ListJobs(reply_to: process.Subject(set.Set(JobId)))
 }
 
 type State {
@@ -54,8 +54,23 @@ fn handle_remove_job(state: State, job_id: JobId) -> actor.Next(State, Message) 
 
 fn handle_list_jobs(
   state: State,
-  reply_to: process.Subject(List(JobId)),
+  reply_to: process.Subject(set.Set(JobId)),
 ) -> actor.Next(State, Message) {
-  process.send(reply_to, set.to_list(state.job_ids))
+  process.send(reply_to, state.job_ids)
   actor.continue(state)
+}
+
+pub fn add_job(name: process.Name(Message), job_id: JobId) {
+  let subject = process.named_subject(name)
+  process.send(subject, AddJob(job_id))
+}
+
+pub fn remove_job(name: process.Name(Message), job_id: JobId) {
+  let subject = process.named_subject(name)
+  process.send(subject, RemoveJob(job_id))
+}
+
+pub fn list_jobs(name: process.Name(Message)) -> set.Set(JobId) {
+  let subject = process.named_subject(name)
+  process.call(subject, 1000, ListJobs)
 }

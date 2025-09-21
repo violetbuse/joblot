@@ -5,6 +5,7 @@ import gleam/list
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
+import gleam/set
 import joblot/instance
 import joblot/lock
 import pog
@@ -65,7 +66,7 @@ pub opaque type Message {
   TestInstances
   AddInstance(instance.JobId)
   RemoveInstance(instance.JobId)
-  ListInstances(reply_to: process.Subject(List(instance.JobId)))
+  ListInstances(reply_to: process.Subject(set.Set(instance.JobId)))
 }
 
 fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {
@@ -238,9 +239,29 @@ fn handle_remove_instance(
 
 fn handle_list_instances(
   state: State,
-  reply_to: process.Subject(List(instance.JobId)),
+  reply_to: process.Subject(set.Set(instance.JobId)),
 ) -> actor.Next(State, Message) {
-  let job_ids = dict.keys(state.jobid_index)
-  process.send(reply_to, job_ids)
+  let result_set =
+    state.jobid_index
+    |> dict.keys
+    |> set.from_list
+
+  process.send(reply_to, result_set)
+
   actor.continue(state)
+}
+
+pub fn add_instance(name: process.Name(Message), job_id: instance.JobId) {
+  let subject = process.named_subject(name)
+  process.send(subject, AddInstance(job_id))
+}
+
+pub fn remove_instance(name: process.Name(Message), job_id: instance.JobId) {
+  let subject = process.named_subject(name)
+  process.send(subject, RemoveInstance(job_id))
+}
+
+pub fn list_instances(name: process.Name(Message)) -> set.Set(instance.JobId) {
+  let subject = process.named_subject(name)
+  process.call(subject, 1000, ListInstances)
 }
