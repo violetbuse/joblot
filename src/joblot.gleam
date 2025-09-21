@@ -5,7 +5,7 @@ import gleam/erlang/process
 import gleam/io
 import gleam/otp/static_supervisor as supervisor
 import joblot/api
-import joblot/lock_manager
+import joblot/lock as lock_manager
 import joblot/reconciler
 import joblot/registry
 import joblot/target
@@ -40,8 +40,15 @@ pub fn main() {
     |> supervisor.add(pool_child)
     |> supervisor.add(api.supervised())
     |> supervisor.add(target.supervised(target_name))
-    |> supervisor.add(lock_manager.supervised(lock_manager_name, pool_name))
-    |> supervisor.add(registry.supervised(registry_name, pool_name))
+    |> supervisor.add(registry.supervised(
+      registry_name,
+      pool_name,
+      lock_manager_name,
+    ))
+    |> supervisor.add(lock_manager.lock_manager_supervised(
+      lock_manager_name,
+      pool_name,
+    ))
     |> supervisor.add(reconciler.supervised(
       reconciler_name,
       target: target_name,

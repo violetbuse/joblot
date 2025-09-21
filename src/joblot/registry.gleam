@@ -3,9 +3,11 @@ import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/otp/actor
+import gleam/otp/static_supervisor
 import gleam/otp/supervision
 import gleam/result
 import joblot/instance
+import joblot/lock
 import pog
 
 const test_instances_interval = 10_000
@@ -13,10 +15,11 @@ const test_instances_interval = 10_000
 pub fn start_registry(
   name: process.Name(Message),
   db: process.Name(pog.Message),
+  lock_manager: process.Name(lock.LockMgrMessage),
 ) {
   actor.new_with_initialiser(5000, fn(subject) {
     process.send_after(subject, test_instances_interval, TestInstances)
-    let state = State(subject, db, dict.new(), dict.new())
+    let state = State(subject, db, lock_manager, dict.new(), dict.new())
 
     let selector =
       process.new_selector()
@@ -36,21 +39,23 @@ pub fn start_registry(
   |> actor.start
 }
 
-pub fn supervised(name: process.Name(Message), db: process.Name(pog.Message)) {
-  supervision.worker(fn() { start_registry(name, db) })
+pub fn supervised(
+  name: process.Name(Message),
+  db: process.Name(pog.Message),
+  lock_manager: process.Name(lock.LockMgrMessage),
+) {
+  supervision.worker(fn() { start_registry(name, db, lock_manager) })
 }
 
 type InstanceInfo {
-  InstanceInfo(
-    job_id: instance.JobId,
-    subject: process.Subject(instance.Message),
-  )
+  InstanceInfo(job_id: instance.JobId, supervisor_pid: process.Pid)
 }
 
 type State {
   State(
     self: process.Subject(Message),
     db: process.Name(pog.Message),
+    lock_manager: process.Name(lock.LockMgrMessage),
     instances: Dict(process.Pid, InstanceInfo),
     jobid_index: Dict(instance.JobId, process.Pid),
   )
@@ -77,21 +82,21 @@ fn replace_instance(
   job_id: instance.JobId,
   pid: process.Pid,
 ) -> Result(State, String) {
-  use instance_start_result <- result.try(
-    instance.start(job_id, state.db)
+  use supervisor_pid <- result.try(
+    instance.start(job_id, state.db, state.lock_manager)
     |> result.replace_error("Failed to start replacement instance"),
   )
 
-  let new_info = InstanceInfo(job_id, instance_start_result.data)
+  let new_info = InstanceInfo(job_id, supervisor_pid)
 
   let new_instances_dict =
     state.instances
     |> dict.delete(pid)
-    |> dict.insert(instance_start_result.pid, new_info)
+    |> dict.insert(supervisor_pid, new_info)
 
   let new_jobid_index =
     state.jobid_index
-    |> dict.insert(job_id, instance_start_result.pid)
+    |> dict.insert(job_id, supervisor_pid)
 
   Ok(
     State(..state, instances: new_instances_dict, jobid_index: new_jobid_index),
@@ -109,7 +114,7 @@ fn handle_instance_exited(
         Ok(new_state) -> actor.continue(new_state)
         Error(reason) -> {
           state.instances
-          |> dict.each(fn(_, info) { instance.stop(info.subject) })
+          |> dict.each(fn(_, info) { process.send_exit(info.supervisor_pid) })
 
           actor.stop_abnormal(reason)
         }
@@ -176,17 +181,15 @@ fn handle_add_instance(
     case existing_instance_info {
       Ok(_existing_instance) -> Ok(state)
       Error(_) -> {
-        use instance_start_result <- result.try(
-          instance.start(job_id, state.db)
+        use pid <- result.try(
+          instance.start(job_id, state.db, state.lock_manager)
           |> result.replace_error("Failed to start new instance"),
         )
 
-        let new_info = InstanceInfo(job_id, instance_start_result.data)
-        let new_instances_dict =
-          state.instances |> dict.insert(instance_start_result.pid, new_info)
+        let new_info = InstanceInfo(job_id, pid)
+        let new_instances_dict = state.instances |> dict.insert(pid, new_info)
 
-        let new_jobid_index =
-          state.jobid_index |> dict.insert(job_id, instance_start_result.pid)
+        let new_jobid_index = state.jobid_index |> dict.insert(job_id, pid)
 
         Ok(
           State(
@@ -217,7 +220,7 @@ fn handle_remove_instance(
     pid
     |> result.map(dict.get(state.instances, _))
     |> result.flatten
-    |> result.map(fn(info) { info.subject })
+    |> result.map(fn(info) { info.supervisor_pid })
 
   let new_instances_dict =
     pid
@@ -225,7 +228,7 @@ fn handle_remove_instance(
     |> result.unwrap(state.instances)
   let new_jobid_index = dict.delete(state.jobid_index, job_id)
 
-  let _ = instance_subject |> result.map(instance.stop)
+  let _ = instance_subject |> result.map(process.send_exit)
 
   actor.continue(
     State(..state, instances: new_instances_dict, jobid_index: new_jobid_index),
