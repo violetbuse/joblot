@@ -3,7 +3,6 @@ import gleam/erlang/process
 import gleam/int
 import gleam/list
 import gleam/otp/actor
-import gleam/otp/static_supervisor
 import gleam/otp/supervision
 import gleam/result
 import joblot/instance

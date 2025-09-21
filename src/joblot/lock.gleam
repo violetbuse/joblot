@@ -4,7 +4,6 @@ import gleam/erlang/process
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision
-import gleam/result
 import gleam/time/timestamp
 import joblot/sql
 import pog

@@ -1,9 +1,6 @@
 import gleam/erlang/process
-import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
-import gleam/otp/supervision
-import gleam/result
 import joblot/lock
 import pog
 
