@@ -90,9 +90,10 @@ pub fn handle_delete_one_off_job(
   wisp.ok()
 }
 
-pub fn handle_get_one_off_job(id: String, _request: Request, db: DB) -> Response {
+pub fn handle_get_one_off_job(id: String, request: Request, db: DB) -> Response {
   let result = {
-    use one_off_job <- result.try(one_off_jobs.get_one_off_job(db, id, None))
+    let filter = one_off_jobs.filter_from_request(request)
+    use one_off_job <- result.try(one_off_jobs.get_one_off_job(db, id, filter))
     Ok(one_off_job)
   }
 
@@ -113,10 +114,13 @@ pub fn handle_list_one_off_jobs(request: Request, db: DB) -> Response {
   let result = {
     let cursor =
       wisp.get_query(request) |> list.key_find("cursor") |> result.unwrap("")
+
+    let filter = one_off_jobs.filter_from_request(request)
+
     use one_off_jobs <- result.try(one_off_jobs.get_one_off_jobs(
       db,
       cursor,
-      None,
+      filter,
     ))
     Ok(one_off_jobs)
   }

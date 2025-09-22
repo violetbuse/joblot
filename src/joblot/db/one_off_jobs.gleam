@@ -13,6 +13,7 @@ import joblot/hash
 import joblot/sql
 import joblot/utils
 import pog
+import wisp.{type Request as WispRequest}
 
 pub type OneOffJob {
   OneOffJob(
@@ -201,6 +202,13 @@ pub fn create_one_off_job(
 
 pub type Filter {
   Filter(user_id: Option(String), tenant_id: Option(String))
+}
+
+pub fn filter_from_request(request: WispRequest) -> Option(Filter) {
+  let query = wisp.get_query(request)
+  let user_id = query |> list.key_find("user_id") |> option.from_result
+  let tenant_id = query |> list.key_find("tenant_id") |> option.from_result
+  Some(Filter(user_id, tenant_id))
 }
 
 pub fn get_one_off_job(
