@@ -1,6 +1,8 @@
 import glanoid
 import gleam/dict
 import gleam/erlang/process
+import gleam/int
+import gleam/io
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision
@@ -8,9 +10,9 @@ import gleam/time/timestamp
 import joblot/sql
 import pog
 
-const heartbeat_interval = 14_000
+const heartbeat_interval_ms = 14_000
 
-const lock_expiration = 30_000
+const lock_expiration_ms = 30_000
 
 pub opaque type Lock {
   Lock(pid: process.Pid, subject: process.Subject(Message))
@@ -22,7 +24,9 @@ pub fn start_lock(
   manager: process.Name(LockMgrMessage),
 ) {
   actor.new_with_initialiser(5000, fn(subject) {
-    process.send_after(subject, heartbeat_interval, Heartbeat)
+    process.send_after(subject, heartbeat_interval_ms, Heartbeat)
+
+    io.println("Starting lock for " <> id)
 
     let assert Ok(nanoid) = glanoid.make_generator(glanoid.default_alphabet)
     let nonce = nanoid(21)
@@ -30,6 +34,8 @@ pub fn start_lock(
     let initial_state =
       State(subject, db, manager, id, nonce, False)
       |> try_acquire_lock
+
+    echo initial_state
 
     let initialised =
       actor.initialised(initial_state)
@@ -72,7 +78,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
       actor.continue(state)
     }
     Heartbeat -> {
-      process.send_after(state.self, heartbeat_interval, Heartbeat)
+      process.send_after(state.self, heartbeat_interval_ms, Heartbeat)
       let manager_subject = process.named_subject(state.manager)
       let self_lock = Lock(process.self(), state.self)
 
@@ -112,18 +118,18 @@ fn try_acquire_lock(state: State) -> State {
       timestamp.system_time()
       |> timestamp.to_unix_seconds_and_nanoseconds
 
-    let expires_at = current_time + lock_expiration
+    let expires_at = current_time + lock_expiration_ms / 1000
 
     case sql.insert_lock(connection, id, nonce, expires_at) {
       Ok(pog.Returned(1, _)) -> {
         Ok(Nil)
       }
-      _ -> {
+      failure_1 -> {
         case sql.update_lock(connection, id, nonce, expires_at) {
           Ok(pog.Returned(1, _)) -> {
             Ok(Nil)
           }
-          _ -> {
+          failure_2 -> {
             Error(Nil)
           }
         }
@@ -166,7 +172,7 @@ pub fn start_lock_manager(
 ) {
   let start_result =
     actor.new_with_initialiser(1000, fn(self) {
-      process.send_after(self, heartbeat_interval, LockMgrHeartbeat)
+      process.send_after(self, heartbeat_interval_ms / 3, LockMgrHeartbeat)
 
       actor.initialised(LockMgrState(self, db, dict.new()))
       |> actor.returning(self)
@@ -212,6 +218,12 @@ fn handle_lock_mgr_message(
 ) -> actor.Next(LockMgrState, LockMgrMessage) {
   case message {
     LockMgrHeartbeat -> {
+      process.send_after(
+        state.self,
+        heartbeat_interval_ms / 3,
+        LockMgrHeartbeat,
+      )
+
       let #(current_time, _) =
         timestamp.system_time()
         |> timestamp.to_unix_seconds_and_nanoseconds

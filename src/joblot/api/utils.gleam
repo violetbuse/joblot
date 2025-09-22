@@ -45,6 +45,18 @@ pub fn decode_optional_int_field(
   next(value)
 }
 
+pub fn decode_optional_bool_field(
+  name: String,
+  next: fn(Option(Bool)) -> decode.Decoder(final),
+) -> decode.Decoder(final) {
+  use value <- decode.optional_field(
+    name,
+    None,
+    decode.bool |> decode.map(option.Some),
+  )
+  next(value)
+}
+
 pub fn decode_http_method() -> decode.Decoder(http.Method) {
   use value <- decode.then(decode.string)
   case string.uppercase(value) {

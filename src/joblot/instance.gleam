@@ -11,8 +11,8 @@ pub type JobId {
 
 fn job_id_to_string(job_id: JobId) -> String {
   case job_id {
-    Cron(id) -> "cron_" <> id
-    OneTime(id) -> "one_time_" <> id
+    Cron(id) -> id
+    OneTime(id) -> id
   }
 }
 

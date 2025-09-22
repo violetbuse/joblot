@@ -26,7 +26,10 @@ fn create_one_off_job_decoder() -> decode.Decoder(one_off_jobs.CreateOneOffJob) 
   use tenant_id <- utils.decode_optional_string_field("tenant_id")
   use timeout_ms <- utils.decode_optional_int_field("timeout_ms")
   use execute_at <- utils.decode_optional_int_field("execute_at")
-  use maximum_retries <- utils.decode_optional_int_field("maximum_retries")
+  use maximum_attempts <- utils.decode_optional_int_field("maximum_attempts")
+  use non_2xx_is_failure <- utils.decode_optional_bool_field(
+    "non_2xx_is_failure",
+  )
   decode.success(one_off_jobs.CreateOneOffJob(
     method:,
     url:,
@@ -37,7 +40,8 @@ fn create_one_off_job_decoder() -> decode.Decoder(one_off_jobs.CreateOneOffJob) 
     tenant_id:,
     timeout_ms:,
     execute_at:,
-    maximum_retries:,
+    maximum_attempts:,
+    non_2xx_is_failure:,
   ))
 }
 
