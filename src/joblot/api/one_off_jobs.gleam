@@ -7,72 +7,66 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/uri
+import joblot/api/error
 import joblot/api/utils
+import joblot/db/one_off_jobs
 import pog
 import wisp.{type Request, type Response}
 
 type DB =
   process.Name(pog.Message)
 
-type CreateOneOffJob {
-  CreateOneOffJob(
-    metadata: List(#(String, String)),
-    user_id: String,
-    tenant_id: String,
-    method: http.Method,
-    url: String,
-    headers: List(#(String, String)),
-    body: String,
-    timeout_ms: Int,
-    execute_at: Int,
-    maximum_retries: Int,
-  )
-}
-
-fn create_one_off_job_decoder() -> decode.Decoder(CreateOneOffJob) {
-  use metadata <- decode.optional_field("metadata", [], utils.decode_metadata())
-  use user_id <- decode.optional_field(
-    "user_id",
-    None,
-    decode.string |> decode.map(option.Some),
-  )
-  use tenant_id <- decode.optional_field(
-    "tenant_id",
-    None,
-    decode.string |> decode.map(option.Some),
-  )
-  use method <- decode.field("method", decode.string)
-  use url <- decode.field("url", decode.string)
-  use headers <- decode.optional_field(
-    "headers",
-    [],
-    decode.dict(decode.string, decode.string)
-      |> decode.map(dict.to_list)
-      |> decode.map(list.map(_, fn(tuple) { tuple.0 <> ":" <> tuple.1 })),
-  )
+fn create_one_off_job_decoder() -> decode.Decoder(one_off_jobs.CreateOneOffJob) {
+  use method <- decode.field("method", utils.decode_http_method())
+  use url <- decode.field("url", utils.decode_url())
+  use headers <- utils.decode_headers()
   use body <- decode.optional_field("body", "", decode.string)
-  use timeout_ms <- decode.field("timeout_ms", decode.int)
-  use execute_at <- decode.field("execute_at", decode.int)
-  use maximum_retries <- decode.field("maximum_retries", decode.int)
-  todo
+  use metadata <- utils.decode_metadata()
+  use user_id <- utils.decode_optional_string_field("user_id")
+  use tenant_id <- utils.decode_optional_string_field("tenant_id")
+  use timeout_ms <- utils.decode_optional_int_field("timeout_ms")
+  use execute_at <- utils.decode_optional_int_field("execute_at")
+  use maximum_retries <- utils.decode_optional_int_field("maximum_retries")
+  decode.success(one_off_jobs.CreateOneOffJob(
+    method:,
+    url:,
+    headers:,
+    body:,
+    metadata:,
+    user_id:,
+    tenant_id:,
+    timeout_ms:,
+    execute_at:,
+    maximum_retries:,
+  ))
 }
 
 pub fn handle_create_one_off_job(request: Request, db: DB) -> Response {
   use json <- wisp.require_json(request)
   let result = {
-    use input <- result.try(decode.run(json, create_one_off_job_decoder()))
-
-    Ok(
-      json.object([
-        #("message", json.string("CreateOneOffJob")),
-      ])
-      |> json.to_string,
+    use create_one_off <- error.require_decoded(
+      json,
+      create_one_off_job_decoder(),
     )
+    use created_job <- result.try(
+      one_off_jobs.create_one_off_job(db, create_one_off)
+      |> result.map_error(error.from_pog_query_error),
+    )
+
+    Ok(created_job)
   }
 
   case result {
-    Ok(json) -> wisp.json_response(json, 200)
-    Error(_) -> wisp.bad_request("Invalid request")
+    Error(error) -> {
+      error.to_response(error)
+    }
+    Ok(created_job) -> {
+      wisp.response(200)
+      |> wisp.json_body(
+        one_off_jobs.one_off_job_json(created_job)
+        |> json.to_string,
+      )
+    }
   }
 }
 

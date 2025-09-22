@@ -47,15 +47,15 @@ fn handle_request(request: Request, context: Context) -> Response {
   use <- wisp.log_request(request)
 
   case request.method, request.path_segments(request) {
-    http.Post, ["one_off_jobs"] ->
+    http.Post, ["api", "one_off_jobs"] ->
       one_off_jobs.handle_create_one_off_job(request, context.db)
-    http.Put, ["one_off_jobs", id] ->
+    http.Put, ["api", "one_off_jobs", id] ->
       one_off_jobs.handle_update_one_off_job(id, request, context.db)
-    http.Delete, ["one_off_jobs", id] ->
+    http.Delete, ["api", "one_off_jobs", id] ->
       one_off_jobs.handle_delete_one_off_job(id, request, context.db)
-    http.Get, ["one_off_jobs", id] ->
+    http.Get, ["api", "one_off_jobs", id] ->
       one_off_jobs.handle_get_one_off_job(id, request, context.db)
-    http.Get, ["one_off_jobs"] ->
+    http.Get, ["api", "one_off_jobs"] ->
       one_off_jobs.handle_list_one_off_jobs(request, context.db)
     _, _ -> wisp.not_found()
   }
