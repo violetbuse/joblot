@@ -52,10 +52,10 @@ pub fn handle_create_one_off_job(request: Request, db: DB) -> Response {
       json,
       create_one_off_job_decoder(),
     )
-    use created_job <- result.try(
-      one_off_jobs.create_one_off_job(db, create_one_off)
-      |> result.map_error(error.from_pog_query_error),
-    )
+    use created_job <- result.try(one_off_jobs.create_one_off_job(
+      db,
+      create_one_off,
+    ))
 
     Ok(created_job)
   }
@@ -90,10 +90,56 @@ pub fn handle_delete_one_off_job(
   wisp.ok()
 }
 
-pub fn handle_get_one_off_job(id: String, request: Request, db: DB) -> Response {
-  wisp.ok()
+pub fn handle_get_one_off_job(id: String, _request: Request, db: DB) -> Response {
+  let result = {
+    use one_off_job <- result.try(one_off_jobs.get_one_off_job(db, id, None))
+    Ok(one_off_job)
+  }
+
+  case result {
+    Error(error) -> {
+      error.to_response(error)
+    }
+    Ok(one_off_job) -> {
+      wisp.response(200)
+      |> wisp.json_body(
+        one_off_jobs.one_off_job_json(one_off_job) |> json.to_string,
+      )
+    }
+  }
 }
 
 pub fn handle_list_one_off_jobs(request: Request, db: DB) -> Response {
-  wisp.ok()
+  let result = {
+    let cursor =
+      wisp.get_query(request) |> list.key_find("cursor") |> result.unwrap("")
+    use one_off_jobs <- result.try(one_off_jobs.get_one_off_jobs(
+      db,
+      cursor,
+      None,
+    ))
+    Ok(one_off_jobs)
+  }
+
+  case result {
+    Error(error) -> {
+      error.to_response(error)
+    }
+    Ok(one_off_jobs) -> {
+      let next_page_cursor =
+        one_off_jobs
+        |> list.last
+        |> result.map(fn(one_off_job) { one_off_job.id })
+        |> option.from_result
+
+      let response_json =
+        json.object([
+          #("next_page_cursor", json.nullable(next_page_cursor, json.string)),
+          #("data", json.array(one_off_jobs, one_off_jobs.one_off_job_json)),
+        ])
+
+      wisp.response(200)
+      |> wisp.json_body(json.to_string(response_json))
+    }
+  }
 }

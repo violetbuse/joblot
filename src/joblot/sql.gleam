@@ -346,11 +346,10 @@ pub type GetOneOffJobsRow {
 ///
 pub fn get_one_off_jobs(
   db: pog.Connection,
-  arg_1: Int,
-  arg_2: Int,
-  arg_3: Bool,
-  arg_4: String,
-  arg_5: String,
+  arg_1: String,
+  arg_2: String,
+  arg_3: String,
+  arg_4: Int,
 ) -> Result(pog.Returned(GetOneOffJobsRow), pog.QueryError) {
   let decoder = {
     use id <- decode.field(0, decode.string)
@@ -389,17 +388,16 @@ pub fn get_one_off_jobs(
 
   "SELECT *
 FROM one_off_jobs
-WHERE execute_at >= $1
-    AND execute_at <= $2
-    AND completed = $3
-    AND user_id LIKE $4
-    AND tenant_id LIKE $5;"
+WHERE user_id LIKE $1
+    AND tenant_id LIKE $2
+    AND id > $3
+ORDER BY id ASC
+LIMIT $4;"
   |> pog.query
-  |> pog.parameter(pog.int(arg_1))
-  |> pog.parameter(pog.int(arg_2))
-  |> pog.parameter(pog.bool(arg_3))
-  |> pog.parameter(pog.text(arg_4))
-  |> pog.parameter(pog.text(arg_5))
+  |> pog.parameter(pog.text(arg_1))
+  |> pog.parameter(pog.text(arg_2))
+  |> pog.parameter(pog.text(arg_3))
+  |> pog.parameter(pog.int(arg_4))
   |> pog.returning(decoder)
   |> pog.execute(db)
 }

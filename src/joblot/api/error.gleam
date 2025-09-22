@@ -10,6 +10,7 @@ pub type ApiError {
   JsonDecodeError(errors: List(String))
   BadRequestError(message: String)
   InternalServerError
+  NotFoundError
 }
 
 pub fn to_response(error: ApiError) -> Response {
@@ -31,6 +32,10 @@ pub fn to_response(error: ApiError) -> Response {
         #("error", json.string("JsonDecodeError")),
         #("errors", json.array(errors, json.string)),
       ]),
+    )
+    NotFoundError -> #(
+      404,
+      json.object([#("error", json.string("NotFoundError"))]),
     )
   }
 

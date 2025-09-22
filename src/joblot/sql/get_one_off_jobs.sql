@@ -1,7 +1,7 @@
 SELECT *
 FROM one_off_jobs
-WHERE execute_at >= $1
-    AND execute_at <= $2
-    AND completed = $3
-    AND user_id LIKE $4
-    AND tenant_id LIKE $5;
+WHERE user_id LIKE $1
+    AND tenant_id LIKE $2
+    AND id > $3
+ORDER BY id ASC
+LIMIT $4;

@@ -4,9 +4,11 @@ import gleam/erlang/process
 import gleam/function
 import gleam/http
 import gleam/json
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/uri
+import joblot/api/error
 import joblot/hash
 import joblot/sql
 import joblot/utils
@@ -38,9 +40,8 @@ pub type RequestData {
 }
 
 pub type AttemptData {
-  Success(planned_at: Int, attempted_at: Int, response: ResponseData)
-  Failure(planned_at: Int, attempted_at: Int, response: ResponseData)
-  Error(planned_at: Int, attempted_at: Int, error: String)
+  Response(planned_at: Int, attempted_at: Int, response: ResponseData)
+  RequestError(planned_at: Int, attempted_at: Int, error: String)
 }
 
 pub type ResponseData {
@@ -80,23 +81,15 @@ fn request_data_json(request: RequestData) -> json.Json {
 
 fn attempt_data_json(attempt: AttemptData) -> json.Json {
   case attempt {
-    Success(planned_at, attempted_at, response) -> {
+    Response(planned_at, attempted_at, response) -> {
       json.object([
-        #("type", json.string("Success")),
+        #("type", json.string("Response")),
         #("planned_at", json.int(planned_at)),
         #("attempted_at", json.int(attempted_at)),
         #("response", response_data_json(response)),
       ])
     }
-    Failure(planned_at, attempted_at, response) -> {
-      json.object([
-        #("type", json.string("Failure")),
-        #("planned_at", json.int(planned_at)),
-        #("attempted_at", json.int(attempted_at)),
-        #("response", response_data_json(response)),
-      ])
-    }
-    Error(planned_at, attempted_at, error) -> {
+    RequestError(planned_at, attempted_at, error) -> {
       json.object([
         #("type", json.string("Error")),
         #("planned_at", json.int(planned_at)),
@@ -135,7 +128,7 @@ pub type CreateOneOffJob {
 pub fn create_one_off_job(
   db: process.Name(pog.Message),
   job: CreateOneOffJob,
-) -> Result(OneOffJob, pog.QueryError) {
+) -> Result(OneOffJob, error.ApiError) {
   let connection = pog.named_connection(db)
 
   let assert Ok(nanoid) = glanoid.make_generator(glanoid.default_alphabet)
@@ -178,7 +171,9 @@ pub fn create_one_off_job(
       timeout_ms,
     )
 
-  use returned <- result.try(result)
+  use returned <- result.try(
+    result |> result.map_error(error.from_pog_query_error),
+  )
 
   case returned {
     pog.Returned(_, [single_row]) ->
@@ -204,40 +199,172 @@ pub fn create_one_off_job(
   }
 }
 
-pub type TenancyFilter {
-  TenancyFilter(user_id: Option(String), tenant_id: Option(String))
+pub type Filter {
+  Filter(user_id: Option(String), tenant_id: Option(String))
 }
-// pub fn get_one_off_job(
-//   db: process.Name(pog.Message),
-//   id: String,
-//   filter: Option(TenancyFilter),
-// ) -> Result(OneOffJob, pog.QueryError) {
-//   let connection = pog.named_connection(db)
-//   let user_id =
-//     filter
-//     |> option.map(fn(filter) { filter.user_id })
-//     |> option.flatten
-//     |> option.unwrap("%")
 
-//   let tenant_id =
-//     filter
-//     |> option.map(fn(filter) { filter.tenant_id })
-//     |> option.flatten
-//     |> option.unwrap("%")
+pub fn get_one_off_job(
+  db: process.Name(pog.Message),
+  id: String,
+  filter: Option(Filter),
+) -> Result(OneOffJob, error.ApiError) {
+  let connection = pog.named_connection(db)
+  let user_id =
+    filter
+    |> option.map(fn(filter) { filter.user_id })
+    |> option.flatten
+    |> option.unwrap("%")
 
-//   case sql.get_one_off_job(connection, id, user_id, tenant_id) {
-//     pog.Returned(_, [single_row]) ->
-//       Ok(OneOffJob(
-//         id: single_row.id,
-//         created_at: single_row.created_at,
-//         request: RequestData(
-//           method: single_row.method,
-//           url: single_row.url,
-//           headers: single_row.headers,
-//           body: single_row.body,
-//           timeout_ms: single_row.timeout_ms,
-//           non_2xx_is_failure: single_row.non_2xx_is_failure,
-//         ),
-//       ))
-//   }
-// }
+  let tenant_id =
+    filter
+    |> option.map(fn(filter) { filter.tenant_id })
+    |> option.flatten
+    |> option.unwrap("%")
+
+  use pog.Returned(_, rows) <- result.try(
+    sql.get_one_off_job(connection, id, user_id, tenant_id)
+    |> result.map_error(error.from_pog_query_error),
+  )
+
+  let ids = rows |> list.map(fn(row) { row.id })
+
+  use attempts <- result.try(get_attempts_for_jobs(db, ids))
+
+  case rows {
+    [item] -> {
+      let attempts = attempts |> dict.get(item.id) |> result.unwrap([])
+      use method <- result.try(
+        http.parse_method(item.method)
+        |> result.replace_error(error.InternalServerError),
+      )
+      use url <- result.try(
+        uri.parse(item.url) |> result.replace_error(error.InternalServerError),
+      )
+
+      Ok(OneOffJob(
+        id: item.id,
+        created_at: item.created_at,
+        request: RequestData(
+          method: method,
+          url: url,
+          headers: item.headers,
+          body: item.body,
+          timeout_ms: item.timeout_ms,
+          non_2xx_is_failure: item.non_2xx_is_failure,
+        ),
+        user_id: item.user_id |> option.Some,
+        tenant_id: item.tenant_id |> option.Some,
+        planned_at: item.execute_at,
+        maximum_attempts: item.maximum_attempts,
+        attempts: attempts,
+        completed: item.completed,
+      ))
+    }
+    [] -> Error(error.NotFoundError)
+    _ -> panic as "Attempted to get one off job but got multiple rows"
+  }
+}
+
+pub fn get_one_off_jobs(
+  db: process.Name(pog.Message),
+  cursor: String,
+  filter: Option(Filter),
+) -> Result(List(OneOffJob), error.ApiError) {
+  let connection = pog.named_connection(db)
+  let user_id =
+    filter
+    |> option.map(fn(filter) { filter.user_id })
+    |> option.flatten
+    |> option.unwrap("%")
+
+  let tenant_id =
+    filter
+    |> option.map(fn(filter) { filter.tenant_id })
+    |> option.flatten
+    |> option.unwrap("%")
+
+  use pog.Returned(_, rows) <- result.try(
+    sql.get_one_off_jobs(connection, user_id, tenant_id, cursor, 100)
+    |> result.map_error(error.from_pog_query_error),
+  )
+
+  let ids = rows |> list.map(fn(row) { row.id })
+
+  use attempts <- result.try(get_attempts_for_jobs(db, ids))
+
+  rows
+  |> list.map(fn(row) {
+    use method <- result.try(
+      http.parse_method(row.method)
+      |> result.replace_error(error.InternalServerError),
+    )
+    use url <- result.try(
+      uri.parse(row.url) |> result.replace_error(error.InternalServerError),
+    )
+    Ok(OneOffJob(
+      id: row.id,
+      created_at: row.created_at,
+      user_id: row.user_id |> option.Some,
+      tenant_id: row.tenant_id |> option.Some,
+      planned_at: row.execute_at,
+      maximum_attempts: row.maximum_attempts,
+      attempts: attempts |> dict.get(row.id) |> result.unwrap([]),
+      completed: row.completed,
+      request: RequestData(
+        method: method,
+        url: url,
+        headers: row.headers,
+        body: row.body,
+        timeout_ms: row.timeout_ms,
+        non_2xx_is_failure: row.non_2xx_is_failure,
+      ),
+    ))
+  })
+  |> result.all
+}
+
+fn get_attempts_for_jobs(
+  db: process.Name(pog.Message),
+  ids: List(String),
+) -> Result(dict.Dict(String, List(AttemptData)), error.ApiError) {
+  let connection = pog.named_connection(db)
+  use pog.Returned(_, error_rows) <- result.try(
+    sql.get_errored_attempts_for(connection, [], ids)
+    |> result.map_error(error.from_pog_query_error),
+  )
+  use pog.Returned(_, response_rows) <- result.try(
+    sql.get_responses_for(connection, [], ids)
+    |> result.map_error(error.from_pog_query_error),
+  )
+
+  let error_rows_attempts =
+    error_rows
+    |> list.map(fn(row) {
+      #(row.id, RequestError(row.planned_at, row.attempted_at, row.error))
+    })
+  let response_rows_attempts =
+    response_rows
+    |> list.map(fn(row) {
+      #(
+        row.id,
+        Response(
+          row.planned_at,
+          row.attempted_at,
+          ResponseData(
+            status_code: row.res_status_code,
+            headers: row.res_headers,
+            body: row.res_body,
+            response_time_ms: row.response_time_ms,
+          ),
+        ),
+      )
+    })
+
+  let attempts =
+    error_rows_attempts
+    |> list.append(response_rows_attempts)
+    |> list.group(fn(entry) { entry.0 })
+    |> dict.map_values(fn(_, list) { list |> list.map(fn(entry) { entry.1 }) })
+
+  Ok(attempts)
+}
