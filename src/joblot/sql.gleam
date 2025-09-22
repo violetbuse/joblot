@@ -6,6 +6,7 @@
 
 import gleam/dynamic/decode
 import gleam/json.{type Json}
+import gleam/option.{type Option}
 import pog
 
 /// Runs the `clear_locks` query
@@ -163,6 +164,154 @@ RETURNING *;"
   |> pog.execute(db)
 }
 
+/// A row you get from running the `get_errored_attempts_for` query
+/// defined in `./src/joblot/sql/get_errored_attempts_for.sql`.
+///
+/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
+/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub type GetErroredAttemptsForRow {
+  GetErroredAttemptsForRow(
+    id: String,
+    planned_at: Int,
+    attempted_at: Int,
+    user_id: String,
+    tenant_id: String,
+    one_off_job_id: Option(String),
+    cron_job_id: Option(String),
+    error: String,
+  )
+}
+
+/// Runs the `get_errored_attempts_for` query
+/// defined in `./src/joblot/sql/get_errored_attempts_for.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn get_errored_attempts_for(
+  db: pog.Connection,
+  arg_1: List(String),
+  arg_2: List(String),
+) -> Result(pog.Returned(GetErroredAttemptsForRow), pog.QueryError) {
+  let decoder = {
+    use id <- decode.field(0, decode.string)
+    use planned_at <- decode.field(1, decode.int)
+    use attempted_at <- decode.field(2, decode.int)
+    use user_id <- decode.field(3, decode.string)
+    use tenant_id <- decode.field(4, decode.string)
+    use one_off_job_id <- decode.field(5, decode.optional(decode.string))
+    use cron_job_id <- decode.field(6, decode.optional(decode.string))
+    use error <- decode.field(7, decode.string)
+    decode.success(GetErroredAttemptsForRow(
+      id:,
+      planned_at:,
+      attempted_at:,
+      user_id:,
+      tenant_id:,
+      one_off_job_id:,
+      cron_job_id:,
+      error:,
+    ))
+  }
+
+  "SELECT *
+FROM errored_attempts
+WHERE cron_job_id = ANY($1::TEXT [])
+    OR one_off_job_id = ANY($2::TEXT []);"
+  |> pog.query
+  |> pog.parameter(pog.array(fn(value) { pog.text(value) }, arg_1))
+  |> pog.parameter(pog.array(fn(value) { pog.text(value) }, arg_2))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}
+
+/// A row you get from running the `get_one_off_job` query
+/// defined in `./src/joblot/sql/get_one_off_job.sql`.
+///
+/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
+/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub type GetOneOffJobRow {
+  GetOneOffJobRow(
+    id: String,
+    hash: Int,
+    created_at: Int,
+    user_id: String,
+    tenant_id: String,
+    metadata: String,
+    method: String,
+    url: String,
+    headers: List(String),
+    body: String,
+    execute_at: Int,
+    maximum_attempts: Int,
+    non_2xx_is_failure: Bool,
+    completed: Bool,
+    timeout_ms: Int,
+  )
+}
+
+/// Runs the `get_one_off_job` query
+/// defined in `./src/joblot/sql/get_one_off_job.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn get_one_off_job(
+  db: pog.Connection,
+  arg_1: String,
+  arg_2: String,
+  arg_3: String,
+) -> Result(pog.Returned(GetOneOffJobRow), pog.QueryError) {
+  let decoder = {
+    use id <- decode.field(0, decode.string)
+    use hash <- decode.field(1, decode.int)
+    use created_at <- decode.field(2, decode.int)
+    use user_id <- decode.field(3, decode.string)
+    use tenant_id <- decode.field(4, decode.string)
+    use metadata <- decode.field(5, decode.string)
+    use method <- decode.field(6, decode.string)
+    use url <- decode.field(7, decode.string)
+    use headers <- decode.field(8, decode.list(decode.string))
+    use body <- decode.field(9, decode.string)
+    use execute_at <- decode.field(10, decode.int)
+    use maximum_attempts <- decode.field(11, decode.int)
+    use non_2xx_is_failure <- decode.field(12, decode.bool)
+    use completed <- decode.field(13, decode.bool)
+    use timeout_ms <- decode.field(14, decode.int)
+    decode.success(GetOneOffJobRow(
+      id:,
+      hash:,
+      created_at:,
+      user_id:,
+      tenant_id:,
+      metadata:,
+      method:,
+      url:,
+      headers:,
+      body:,
+      execute_at:,
+      maximum_attempts:,
+      non_2xx_is_failure:,
+      completed:,
+      timeout_ms:,
+    ))
+  }
+
+  "SELECT *
+FROM one_off_jobs
+WHERE one_off_jobs.id = $1
+    AND one_off_jobs.user_id LIKE $2
+    AND one_off_jobs.tenant_id LIKE $3;"
+  |> pog.query
+  |> pog.parameter(pog.text(arg_1))
+  |> pog.parameter(pog.text(arg_2))
+  |> pog.parameter(pog.text(arg_3))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}
+
 /// A row you get from running the `get_one_off_jobs` query
 /// defined in `./src/joblot/sql/get_one_off_jobs.sql`.
 ///
@@ -251,6 +400,89 @@ WHERE execute_at >= $1
   |> pog.parameter(pog.bool(arg_3))
   |> pog.parameter(pog.text(arg_4))
   |> pog.parameter(pog.text(arg_5))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}
+
+/// A row you get from running the `get_responses_for` query
+/// defined in `./src/joblot/sql/get_responses_for.sql`.
+///
+/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
+/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub type GetResponsesForRow {
+  GetResponsesForRow(
+    id: String,
+    planned_at: Int,
+    attempted_at: Int,
+    user_id: String,
+    tenant_id: String,
+    one_off_job_id: Option(String),
+    cron_job_id: Option(String),
+    method: String,
+    url: String,
+    req_headers: List(String),
+    req_body: String,
+    res_status_code: Int,
+    res_headers: List(String),
+    res_body: String,
+    response_time_ms: Int,
+  )
+}
+
+/// Runs the `get_responses_for` query
+/// defined in `./src/joblot/sql/get_responses_for.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn get_responses_for(
+  db: pog.Connection,
+  arg_1: List(String),
+  arg_2: List(String),
+) -> Result(pog.Returned(GetResponsesForRow), pog.QueryError) {
+  let decoder = {
+    use id <- decode.field(0, decode.string)
+    use planned_at <- decode.field(1, decode.int)
+    use attempted_at <- decode.field(2, decode.int)
+    use user_id <- decode.field(3, decode.string)
+    use tenant_id <- decode.field(4, decode.string)
+    use one_off_job_id <- decode.field(5, decode.optional(decode.string))
+    use cron_job_id <- decode.field(6, decode.optional(decode.string))
+    use method <- decode.field(7, decode.string)
+    use url <- decode.field(8, decode.string)
+    use req_headers <- decode.field(9, decode.list(decode.string))
+    use req_body <- decode.field(10, decode.string)
+    use res_status_code <- decode.field(11, decode.int)
+    use res_headers <- decode.field(12, decode.list(decode.string))
+    use res_body <- decode.field(13, decode.string)
+    use response_time_ms <- decode.field(14, decode.int)
+    decode.success(GetResponsesForRow(
+      id:,
+      planned_at:,
+      attempted_at:,
+      user_id:,
+      tenant_id:,
+      one_off_job_id:,
+      cron_job_id:,
+      method:,
+      url:,
+      req_headers:,
+      req_body:,
+      res_status_code:,
+      res_headers:,
+      res_body:,
+      response_time_ms:,
+    ))
+  }
+
+  "SELECT *
+FROM responses
+WHERE cron_job_id = ANY($1::TEXT [])
+    OR one_off_job_id = ANY($2::TEXT []);"
+  |> pog.query
+  |> pog.parameter(pog.array(fn(value) { pog.text(value) }, arg_1))
+  |> pog.parameter(pog.array(fn(value) { pog.text(value) }, arg_2))
   |> pog.returning(decoder)
   |> pog.execute(db)
 }
