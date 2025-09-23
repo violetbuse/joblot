@@ -7,7 +7,7 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/time/timestamp
-import joblot/sql
+import joblot/lock/sql
 import pog
 
 const heartbeat_interval_ms = 14_000
@@ -34,8 +34,6 @@ pub fn start_lock(
     let initial_state =
       State(subject, db, manager, id, nonce, False)
       |> try_acquire_lock
-
-    echo initial_state
 
     let initialised =
       actor.initialised(initial_state)

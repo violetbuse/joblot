@@ -9,8 +9,8 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/uri
 import joblot/api/error
+import joblot/api/one_off_jobs/sql
 import joblot/hash
-import joblot/sql
 import joblot/utils
 import pog
 import wisp.{type Request as WispRequest}
@@ -337,11 +337,11 @@ fn get_attempts_for_jobs(
 ) -> Result(dict.Dict(String, List(AttemptData)), error.ApiError) {
   let connection = pog.named_connection(db)
   use pog.Returned(_, error_rows) <- result.try(
-    sql.get_errored_attempts_for(connection, [], ids)
+    sql.get_errored_attempts(connection, ids)
     |> result.map_error(error.from_pog_query_error),
   )
   use pog.Returned(_, response_rows) <- result.try(
-    sql.get_responses_for(connection, [], ids)
+    sql.get_responses(connection, ids)
     |> result.map_error(error.from_pog_query_error),
   )
 

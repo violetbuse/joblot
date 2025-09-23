@@ -7,7 +7,7 @@ import gleam/result
 import gleam/set
 import gleam/time/timestamp
 import joblot/instance
-import joblot/sql
+import joblot/scan/sql
 import joblot/target.{type Message as TargetMessage}
 import pog
 

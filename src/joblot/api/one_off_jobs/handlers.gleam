@@ -8,15 +8,15 @@ import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/uri
 import joblot/api/error
+import joblot/api/one_off_jobs/data
 import joblot/api/utils
-import joblot/db/one_off_jobs
 import pog
 import wisp.{type Request, type Response}
 
 type DB =
   process.Name(pog.Message)
 
-fn create_one_off_job_decoder() -> decode.Decoder(one_off_jobs.CreateOneOffJob) {
+fn create_one_off_job_decoder() -> decode.Decoder(data.CreateOneOffJob) {
   use method <- decode.field("method", utils.decode_http_method())
   use url <- decode.field("url", utils.decode_url())
   use headers <- utils.decode_headers()
@@ -30,7 +30,7 @@ fn create_one_off_job_decoder() -> decode.Decoder(one_off_jobs.CreateOneOffJob) 
   use non_2xx_is_failure <- utils.decode_optional_bool_field(
     "non_2xx_is_failure",
   )
-  decode.success(one_off_jobs.CreateOneOffJob(
+  decode.success(data.CreateOneOffJob(
     method:,
     url:,
     headers:,
@@ -52,10 +52,7 @@ pub fn handle_create_one_off_job(request: Request, db: DB) -> Response {
       json,
       create_one_off_job_decoder(),
     )
-    use created_job <- result.try(one_off_jobs.create_one_off_job(
-      db,
-      create_one_off,
-    ))
+    use created_job <- result.try(data.create_one_off_job(db, create_one_off))
 
     Ok(created_job)
   }
@@ -67,7 +64,7 @@ pub fn handle_create_one_off_job(request: Request, db: DB) -> Response {
     Ok(created_job) -> {
       wisp.response(200)
       |> wisp.json_body(
-        one_off_jobs.one_off_job_json(created_job)
+        data.one_off_job_json(created_job)
         |> json.to_string,
       )
     }
@@ -92,8 +89,8 @@ pub fn handle_delete_one_off_job(
 
 pub fn handle_get_one_off_job(id: String, request: Request, db: DB) -> Response {
   let result = {
-    let filter = one_off_jobs.filter_from_request(request)
-    use one_off_job <- result.try(one_off_jobs.get_one_off_job(db, id, filter))
+    let filter = data.filter_from_request(request)
+    use one_off_job <- result.try(data.get_one_off_job(db, id, filter))
     Ok(one_off_job)
   }
 
@@ -103,9 +100,7 @@ pub fn handle_get_one_off_job(id: String, request: Request, db: DB) -> Response 
     }
     Ok(one_off_job) -> {
       wisp.response(200)
-      |> wisp.json_body(
-        one_off_jobs.one_off_job_json(one_off_job) |> json.to_string,
-      )
+      |> wisp.json_body(data.one_off_job_json(one_off_job) |> json.to_string)
     }
   }
 }
@@ -115,13 +110,9 @@ pub fn handle_list_one_off_jobs(request: Request, db: DB) -> Response {
     let cursor =
       wisp.get_query(request) |> list.key_find("cursor") |> result.unwrap("")
 
-    let filter = one_off_jobs.filter_from_request(request)
+    let filter = data.filter_from_request(request)
 
-    use one_off_jobs <- result.try(one_off_jobs.get_one_off_jobs(
-      db,
-      cursor,
-      filter,
-    ))
+    use one_off_jobs <- result.try(data.get_one_off_jobs(db, cursor, filter))
     Ok(one_off_jobs)
   }
 
@@ -139,7 +130,7 @@ pub fn handle_list_one_off_jobs(request: Request, db: DB) -> Response {
       let response_json =
         json.object([
           #("next_page_cursor", json.nullable(next_page_cursor, json.string)),
-          #("data", json.array(one_off_jobs, one_off_jobs.one_off_job_json)),
+          #("data", json.array(one_off_jobs, data.one_off_job_json)),
         ])
 
       wisp.response(200)

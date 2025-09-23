@@ -4,7 +4,8 @@ import gleam/erlang/process
 import gleam/http
 import gleam/http/request
 import gleam/http/response
-import joblot/api/one_off_jobs
+import joblot/api/error
+import joblot/api/one_off_jobs/handlers as one_off_jobs
 import mist.{type Connection, type ResponseData}
 import pog
 import wisp.{type Request, type Response}
@@ -57,6 +58,6 @@ fn handle_request(request: Request, context: Context) -> Response {
       one_off_jobs.handle_get_one_off_job(id, request, context.db)
     http.Get, ["api", "one_off_jobs"] ->
       one_off_jobs.handle_list_one_off_jobs(request, context.db)
-    _, _ -> wisp.not_found()
+    _, _ -> error.to_response(error.NotFoundError)
   }
 }
