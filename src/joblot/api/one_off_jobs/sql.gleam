@@ -45,18 +45,17 @@ pub fn create_one_off_job(
   db: pog.Connection,
   arg_1: String,
   arg_2: Int,
-  arg_3: Int,
+  arg_3: String,
   arg_4: String,
-  arg_5: String,
-  arg_6: Json,
+  arg_5: Json,
+  arg_6: String,
   arg_7: String,
-  arg_8: String,
-  arg_9: List(String),
-  arg_10: String,
+  arg_8: List(String),
+  arg_9: String,
+  arg_10: Int,
   arg_11: Int,
-  arg_12: Int,
-  arg_13: Bool,
-  arg_14: Int,
+  arg_12: Bool,
+  arg_13: Int,
 ) -> Result(pog.Returned(CreateOneOffJobRow), pog.QueryError) {
   let decoder = {
     use id <- decode.field(0, decode.string)
@@ -96,7 +95,6 @@ pub fn create_one_off_job(
   "INSERT INTO one_off_jobs (
         id,
         hash,
-        created_at,
         user_id,
         tenant_id,
         metadata,
@@ -122,25 +120,23 @@ VALUES (
         $10,
         $11,
         $12,
-        $13,
-        $14
+        $13
     )
 RETURNING *;"
   |> pog.query
   |> pog.parameter(pog.text(arg_1))
   |> pog.parameter(pog.int(arg_2))
-  |> pog.parameter(pog.int(arg_3))
+  |> pog.parameter(pog.text(arg_3))
   |> pog.parameter(pog.text(arg_4))
-  |> pog.parameter(pog.text(arg_5))
-  |> pog.parameter(pog.text(json.to_string(arg_6)))
+  |> pog.parameter(pog.text(json.to_string(arg_5)))
+  |> pog.parameter(pog.text(arg_6))
   |> pog.parameter(pog.text(arg_7))
-  |> pog.parameter(pog.text(arg_8))
-  |> pog.parameter(pog.array(fn(value) { pog.text(value) }, arg_9))
-  |> pog.parameter(pog.text(arg_10))
+  |> pog.parameter(pog.array(fn(value) { pog.text(value) }, arg_8))
+  |> pog.parameter(pog.text(arg_9))
+  |> pog.parameter(pog.int(arg_10))
   |> pog.parameter(pog.int(arg_11))
-  |> pog.parameter(pog.int(arg_12))
-  |> pog.parameter(pog.bool(arg_13))
-  |> pog.parameter(pog.int(arg_14))
+  |> pog.parameter(pog.bool(arg_12))
+  |> pog.parameter(pog.int(arg_13))
   |> pog.returning(decoder)
   |> pog.execute(db)
 }

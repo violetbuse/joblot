@@ -4,6 +4,7 @@ import gleam/erlang/process
 import gleam/http
 import gleam/http/request
 import gleam/http/response
+import joblot/api/cron_jobs/handlers as cron_jobs
 import joblot/api/error
 import joblot/api/one_off_jobs/handlers as one_off_jobs
 import mist.{type Connection, type ResponseData}
@@ -50,6 +51,8 @@ fn handle_request(request: Request, context: Context) -> Response {
   case request.method, request.path_segments(request) {
     _, ["api", "one_off_jobs", ..path_segments] ->
       one_off_jobs.one_off_job_router(path_segments, request, context.db)
+    _, ["api", "cron_jobs", ..path_segments] ->
+      cron_jobs.cron_job_router(path_segments, request, context.db)
     _, _ -> error.to_response(error.NotFoundError)
   }
 }

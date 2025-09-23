@@ -1,7 +1,8 @@
-h1:PmDTY5XFJR01jGhf6spJ1326VVMBsWgItCK2cK+rgio=
+h1:ukGBG0/qWNjS7JeDOeoKd+mp4j2k1WnYWI6eP20zpR4=
 20250922133938_create-locks-table.sql h1:myv5atb2yNJEe8r9Ip2s/uhTQLeXHoNdsphU/f/YJ1Y=
 20250922135432_create-one-off-and-cron-jobs.sql h1:xFxCNSt6/Ui1IyOSFXMnaGrd80AmxwPjTh4TjVzpW6E=
 20250922135554_create-error-table.sql h1:xNyooy62NU4N8smAAPDrYzQS7Cq0+p+Hqbzw0L7+f5I=
 20250922141224_make-user-id-and-tenant-id-non-nullable.sql h1:nTZgcwAVECzKsPS/ce+SZrwTL0thPDy8xxU3x00S83g=
 20250922143012_add-timeout-ms.sql h1:rEwZxNAOE4iQiJpTKi4r5ogMmvcESq+zkgEfNVoZ7z0=
 20250922150818_locks-unique-constraint-add.sql h1:znQ/Up51C/8Ih3noILY/bk+IZV6AdBKk0IUgrqztc0U=
+20250923142805_remove-execute-at-from-cron-jobs.sql h1:/lNq//1Ij29BxiNnyfIajZ4ikzq+LD3QO/apO4dd5mg=

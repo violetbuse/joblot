@@ -1,3 +1,4 @@
+import clockwork
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/http
@@ -70,6 +71,14 @@ pub fn decode_http_method() -> decode.Decoder(http.Method) {
     "TRACE" -> decode.success(http.Trace)
     "CONNECT" -> decode.success(http.Connect)
     _ -> decode.failure(http.Get, "http.Method")
+  }
+}
+
+pub fn decode_cron() -> decode.Decoder(clockwork.Cron) {
+  use value <- decode.then(decode.string)
+  case clockwork.from_string(value) {
+    Ok(cron) -> decode.success(cron)
+    Error(_) -> decode.failure(clockwork.default(), "clockwork.Cron")
   }
 }
 

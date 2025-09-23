@@ -56,7 +56,6 @@ CREATE TABLE cron_jobs (
     url TEXT NOT NULL,
     headers TEXT [] NOT NULL,
     body TEXT NOT NULL,
-    execute_at INTEGER NOT NULL,
     maximum_attempts INTEGER NOT NULL DEFAULT 1,
     non_2xx_is_failure BOOLEAN NOT NULL DEFAULT TRUE,
     timeout_ms INTEGER NOT NULL DEFAULT 10000

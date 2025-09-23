@@ -1,14 +1,14 @@
-INSERT INTO one_off_jobs (
+INSERT INTO cron_jobs (
         id,
         hash,
         user_id,
         tenant_id,
         metadata,
+        cron,
         method,
         url,
         headers,
         body,
-        execute_at,
         maximum_attempts,
         non_2xx_is_failure,
         timeout_ms

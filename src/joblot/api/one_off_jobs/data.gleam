@@ -22,6 +22,7 @@ pub type OneOffJob {
     request: RequestData,
     user_id: Option(String),
     tenant_id: Option(String),
+    metadata: List(#(String, String)),
     planned_at: Int,
     maximum_attempts: Int,
     attempts: List(AttemptData),
@@ -61,6 +62,10 @@ pub fn one_off_job_json(job: OneOffJob) -> json.Json {
     #("request", request_data_json(job.request)),
     #("user_id", json.nullable(job.user_id, json.string)),
     #("tenant_id", json.nullable(job.tenant_id, json.string)),
+    #(
+      "metadata",
+      json.dict(job.metadata |> dict.from_list, function.identity, json.string),
+    ),
     #("planned_at", json.int(job.planned_at)),
     #("maximum_attempts", json.int(job.maximum_attempts)),
     #("attempts", json.array(job.attempts, attempt_data_json)),
@@ -153,12 +158,11 @@ pub fn create_one_off_job(
   let non_2xx_is_failure = job.non_2xx_is_failure |> option.unwrap(True)
   let timeout_ms = job.timeout_ms |> option.unwrap(10_000)
 
-  let result =
+  let insert_result =
     sql.create_one_off_job(
       connection,
       id,
       hash,
-      utils.get_unix_timestamp(),
       user_id,
       tenant_id,
       metadata,
@@ -173,7 +177,7 @@ pub fn create_one_off_job(
     )
 
   use returned <- result.try(
-    result |> result.map_error(error.from_pog_query_error),
+    insert_result |> result.map_error(error.from_pog_query_error),
   )
 
   case returned {
@@ -191,6 +195,7 @@ pub fn create_one_off_job(
         ),
         user_id: single_row.user_id |> option.Some,
         tenant_id: single_row.tenant_id |> option.Some,
+        metadata: job.metadata,
         planned_at: single_row.execute_at,
         maximum_attempts: single_row.maximum_attempts,
         attempts: [],
@@ -272,6 +277,7 @@ pub fn get_one_off_job(
       use url <- result.try(
         uri.parse(item.url) |> result.replace_error(error.InternalServerError),
       )
+      use metadata <- result.try(utils.json_string_to_metadata(item.metadata))
 
       Ok(OneOffJob(
         id: item.id,
@@ -286,6 +292,7 @@ pub fn get_one_off_job(
         ),
         user_id: item.user_id |> option.Some,
         tenant_id: item.tenant_id |> option.Some,
+        metadata: metadata,
         planned_at: item.execute_at,
         maximum_attempts: item.maximum_attempts,
         attempts: attempts,
@@ -324,11 +331,13 @@ pub fn get_one_off_jobs(
     use url <- result.try(
       uri.parse(row.url) |> result.replace_error(error.InternalServerError),
     )
+    use metadata <- result.try(utils.json_string_to_metadata(row.metadata))
     Ok(OneOffJob(
       id: row.id,
       created_at: row.created_at,
       user_id: row.user_id |> option.Some,
       tenant_id: row.tenant_id |> option.Some,
+      metadata: metadata,
       planned_at: row.execute_at,
       maximum_attempts: row.maximum_attempts,
       attempts: attempts |> dict.get(row.id) |> result.unwrap([]),
