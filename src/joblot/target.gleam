@@ -1,4 +1,5 @@
 import gleam/erlang/process
+import gleam/io
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result

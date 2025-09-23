@@ -1,19 +1,13 @@
 import gleam/erlang/process
+import gleam/io
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
 import joblot/lock
 import pog
 
 pub type JobId {
-  Cron(String)
-  OneTime(String)
-}
-
-fn job_id_to_string(job_id: JobId) -> String {
-  case job_id {
-    Cron(id) -> id
-    OneTime(id) -> id
-  }
+  Cron(id: String)
+  OneTime(id: String)
 }
 
 pub fn start(
@@ -25,7 +19,7 @@ pub fn start(
     supervisor.new(supervisor.OneForOne)
     |> supervisor.auto_shutdown(supervisor.AnySignificant)
     |> supervisor.add(lock.supervised(
-      "instance_lock_" <> job_id_to_string(job_id),
+      "instance_lock_" <> job_id.id,
       lock_manager,
       db,
     ))

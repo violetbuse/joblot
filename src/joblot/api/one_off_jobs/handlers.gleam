@@ -16,6 +16,20 @@ import wisp.{type Request, type Response}
 type DB =
   process.Name(pog.Message)
 
+pub fn one_off_job_router(
+  path_segments: List(String),
+  request: Request,
+  db: DB,
+) -> Response {
+  case request.method, path_segments {
+    http.Post, [] -> handle_create_one_off_job(request, db)
+    http.Delete, [id] -> handle_delete_one_off_job(id, request, db)
+    http.Get, [id] -> handle_get_one_off_job(id, request, db)
+    http.Get, [] -> handle_list_one_off_jobs(request, db)
+    _, _ -> error.to_response(error.NotFoundError)
+  }
+}
+
 fn create_one_off_job_decoder() -> decode.Decoder(data.CreateOneOffJob) {
   use method <- decode.field("method", utils.decode_http_method())
   use url <- decode.field("url", utils.decode_url())
@@ -71,20 +85,39 @@ pub fn handle_create_one_off_job(request: Request, db: DB) -> Response {
   }
 }
 
-pub fn handle_update_one_off_job(
-  id: String,
-  request: Request,
-  db: DB,
-) -> Response {
-  wisp.ok()
-}
-
 pub fn handle_delete_one_off_job(
   id: String,
   request: Request,
   db: DB,
 ) -> Response {
-  wisp.ok()
+  let result = {
+    let filter = data.filter_from_request(request)
+    use deleted_job <- result.try(data.delete_one_off_job(db, id, filter))
+    Ok(deleted_job)
+  }
+
+  case result {
+    Error(error) -> {
+      error.to_response(error)
+    }
+    Ok(deleted_job) -> {
+      let response_json = case deleted_job {
+        None ->
+          json.object([
+            #("deleted_job_count", json.int(0)),
+            #("data", json.null()),
+          ])
+        Some(job_data) ->
+          json.object([
+            #("deleted_job_count", json.int(1)),
+            #("data", data.one_off_job_json(job_data)),
+          ])
+      }
+
+      wisp.response(200)
+      |> wisp.json_body(json.to_string(response_json))
+    }
+  }
 }
 
 pub fn handle_get_one_off_job(id: String, request: Request, db: DB) -> Response {

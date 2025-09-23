@@ -1,5 +1,6 @@
 import gleam/erlang/process
 import gleam/int
+import gleam/io
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/set

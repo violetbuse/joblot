@@ -11,7 +11,10 @@ pub fn create_shard_key_hash(id: String) -> Int {
       |> bit_array.slice(0, 32)
 
     use bits <- result.try(bits_result)
-    bits |> bit_array.base16_encode |> int.base_parse(16)
+    bits
+    |> bit_array.base16_encode
+    |> int.base_parse(16)
+    |> result.map(int.absolute_value)
   }
 
   case result {

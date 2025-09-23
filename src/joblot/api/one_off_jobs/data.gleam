@@ -211,23 +211,47 @@ pub fn filter_from_request(request: WispRequest) -> Option(Filter) {
   Some(Filter(user_id, tenant_id))
 }
 
+fn filter_user_id_like(filter: Option(Filter)) -> String {
+  filter
+  |> option.map(fn(filter) { filter.user_id })
+  |> option.flatten
+  |> option.unwrap("%")
+}
+
+fn filter_tenant_id_like(filter: Option(Filter)) -> String {
+  filter
+  |> option.map(fn(filter) { filter.tenant_id })
+  |> option.flatten
+  |> option.unwrap("%")
+}
+
+pub fn delete_one_off_job(
+  db: process.Name(pog.Message),
+  id: String,
+  filter: Option(Filter),
+) -> Result(Option(OneOffJob), error.ApiError) {
+  let connection = pog.named_connection(db)
+  let user_id = filter_user_id_like(filter)
+  let tenant_id = filter_tenant_id_like(filter)
+
+  let got_row = get_one_off_job(db, id, filter) |> option.from_result
+  let delete_result =
+    sql.delete_one_off_job(connection, id, user_id, tenant_id)
+    |> result.map_error(error.from_pog_query_error)
+
+  delete_result
+  |> result.replace(got_row)
+}
+
 pub fn get_one_off_job(
   db: process.Name(pog.Message),
   id: String,
   filter: Option(Filter),
 ) -> Result(OneOffJob, error.ApiError) {
   let connection = pog.named_connection(db)
-  let user_id =
-    filter
-    |> option.map(fn(filter) { filter.user_id })
-    |> option.flatten
-    |> option.unwrap("%")
+  let user_id = filter_user_id_like(filter)
 
-  let tenant_id =
-    filter
-    |> option.map(fn(filter) { filter.tenant_id })
-    |> option.flatten
-    |> option.unwrap("%")
+  let tenant_id = filter_tenant_id_like(filter)
 
   use pog.Returned(_, rows) <- result.try(
     sql.get_one_off_job(connection, id, user_id, tenant_id)
@@ -279,17 +303,8 @@ pub fn get_one_off_jobs(
   filter: Option(Filter),
 ) -> Result(List(OneOffJob), error.ApiError) {
   let connection = pog.named_connection(db)
-  let user_id =
-    filter
-    |> option.map(fn(filter) { filter.user_id })
-    |> option.flatten
-    |> option.unwrap("%")
-
-  let tenant_id =
-    filter
-    |> option.map(fn(filter) { filter.tenant_id })
-    |> option.flatten
-    |> option.unwrap("%")
+  let user_id = filter_user_id_like(filter)
+  let tenant_id = filter_tenant_id_like(filter)
 
   use pog.Returned(_, rows) <- result.try(
     sql.get_one_off_jobs(connection, user_id, tenant_id, cursor, 100)

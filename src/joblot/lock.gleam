@@ -26,8 +26,6 @@ pub fn start_lock(
   actor.new_with_initialiser(5000, fn(subject) {
     process.send_after(subject, heartbeat_interval_ms, Heartbeat)
 
-    io.println("Starting lock for " <> id)
-
     let assert Ok(nanoid) = glanoid.make_generator(glanoid.default_alphabet)
     let nonce = nanoid(21)
 
@@ -122,12 +120,12 @@ fn try_acquire_lock(state: State) -> State {
       Ok(pog.Returned(1, _)) -> {
         Ok(Nil)
       }
-      failure_1 -> {
+      _failure_1 -> {
         case sql.update_lock(connection, id, nonce, expires_at) {
           Ok(pog.Returned(1, _)) -> {
             Ok(Nil)
           }
-          failure_2 -> {
+          _failure_2 -> {
             Error(Nil)
           }
         }
