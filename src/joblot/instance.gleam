@@ -1,5 +1,4 @@
 import gleam/erlang/process
-import gleam/io
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
 import joblot/lock

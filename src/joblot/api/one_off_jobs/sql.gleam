@@ -312,96 +312,6 @@ WHERE one_off_jobs.id = $1
   |> pog.execute(db)
 }
 
-/// A row you get from running the `get_one_off_jobs` query
-/// defined in `./src/joblot/api/one_off_jobs/sql/get_one_off_jobs.sql`.
-///
-/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
-/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
-///
-pub type GetOneOffJobsRow {
-  GetOneOffJobsRow(
-    id: String,
-    hash: Int,
-    created_at: Int,
-    user_id: String,
-    tenant_id: String,
-    metadata: String,
-    method: String,
-    url: String,
-    headers: List(String),
-    body: String,
-    execute_at: Int,
-    maximum_attempts: Int,
-    non_2xx_is_failure: Bool,
-    completed: Bool,
-    timeout_ms: Int,
-  )
-}
-
-/// Runs the `get_one_off_jobs` query
-/// defined in `./src/joblot/api/one_off_jobs/sql/get_one_off_jobs.sql`.
-///
-/// > 🐿️ This function was generated automatically using v4.4.1 of
-/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
-///
-pub fn get_one_off_jobs(
-  db: pog.Connection,
-  arg_1: String,
-  arg_2: String,
-  arg_3: String,
-  arg_4: Int,
-) -> Result(pog.Returned(GetOneOffJobsRow), pog.QueryError) {
-  let decoder = {
-    use id <- decode.field(0, decode.string)
-    use hash <- decode.field(1, decode.int)
-    use created_at <- decode.field(2, decode.int)
-    use user_id <- decode.field(3, decode.string)
-    use tenant_id <- decode.field(4, decode.string)
-    use metadata <- decode.field(5, decode.string)
-    use method <- decode.field(6, decode.string)
-    use url <- decode.field(7, decode.string)
-    use headers <- decode.field(8, decode.list(decode.string))
-    use body <- decode.field(9, decode.string)
-    use execute_at <- decode.field(10, decode.int)
-    use maximum_attempts <- decode.field(11, decode.int)
-    use non_2xx_is_failure <- decode.field(12, decode.bool)
-    use completed <- decode.field(13, decode.bool)
-    use timeout_ms <- decode.field(14, decode.int)
-    decode.success(GetOneOffJobsRow(
-      id:,
-      hash:,
-      created_at:,
-      user_id:,
-      tenant_id:,
-      metadata:,
-      method:,
-      url:,
-      headers:,
-      body:,
-      execute_at:,
-      maximum_attempts:,
-      non_2xx_is_failure:,
-      completed:,
-      timeout_ms:,
-    ))
-  }
-
-  "SELECT *
-FROM one_off_jobs
-WHERE user_id LIKE $1
-    AND tenant_id LIKE $2
-    AND id > $3
-ORDER BY id ASC
-LIMIT $4;"
-  |> pog.query
-  |> pog.parameter(pog.text(arg_1))
-  |> pog.parameter(pog.text(arg_2))
-  |> pog.parameter(pog.text(arg_3))
-  |> pog.parameter(pog.int(arg_4))
-  |> pog.returning(decoder)
-  |> pog.execute(db)
-}
-
 /// A row you get from running the `get_responses` query
 /// defined in `./src/joblot/api/one_off_jobs/sql/get_responses.sql`.
 ///
@@ -478,6 +388,96 @@ FROM responses
 WHERE one_off_job_id = ANY($1::TEXT []);"
   |> pog.query
   |> pog.parameter(pog.array(fn(value) { pog.text(value) }, arg_1))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}
+
+/// A row you get from running the `list_one_off_jobs` query
+/// defined in `./src/joblot/api/one_off_jobs/sql/list_one_off_jobs.sql`.
+///
+/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
+/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub type ListOneOffJobsRow {
+  ListOneOffJobsRow(
+    id: String,
+    hash: Int,
+    created_at: Int,
+    user_id: String,
+    tenant_id: String,
+    metadata: String,
+    method: String,
+    url: String,
+    headers: List(String),
+    body: String,
+    execute_at: Int,
+    maximum_attempts: Int,
+    non_2xx_is_failure: Bool,
+    completed: Bool,
+    timeout_ms: Int,
+  )
+}
+
+/// Runs the `list_one_off_jobs` query
+/// defined in `./src/joblot/api/one_off_jobs/sql/list_one_off_jobs.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn list_one_off_jobs(
+  db: pog.Connection,
+  arg_1: String,
+  arg_2: String,
+  arg_3: String,
+  arg_4: Int,
+) -> Result(pog.Returned(ListOneOffJobsRow), pog.QueryError) {
+  let decoder = {
+    use id <- decode.field(0, decode.string)
+    use hash <- decode.field(1, decode.int)
+    use created_at <- decode.field(2, decode.int)
+    use user_id <- decode.field(3, decode.string)
+    use tenant_id <- decode.field(4, decode.string)
+    use metadata <- decode.field(5, decode.string)
+    use method <- decode.field(6, decode.string)
+    use url <- decode.field(7, decode.string)
+    use headers <- decode.field(8, decode.list(decode.string))
+    use body <- decode.field(9, decode.string)
+    use execute_at <- decode.field(10, decode.int)
+    use maximum_attempts <- decode.field(11, decode.int)
+    use non_2xx_is_failure <- decode.field(12, decode.bool)
+    use completed <- decode.field(13, decode.bool)
+    use timeout_ms <- decode.field(14, decode.int)
+    decode.success(ListOneOffJobsRow(
+      id:,
+      hash:,
+      created_at:,
+      user_id:,
+      tenant_id:,
+      metadata:,
+      method:,
+      url:,
+      headers:,
+      body:,
+      execute_at:,
+      maximum_attempts:,
+      non_2xx_is_failure:,
+      completed:,
+      timeout_ms:,
+    ))
+  }
+
+  "SELECT *
+FROM one_off_jobs
+WHERE user_id LIKE $1
+    AND tenant_id LIKE $2
+    AND id > $3
+ORDER BY id ASC
+LIMIT $4;"
+  |> pog.query
+  |> pog.parameter(pog.text(arg_1))
+  |> pog.parameter(pog.text(arg_2))
+  |> pog.parameter(pog.text(arg_3))
+  |> pog.parameter(pog.int(arg_4))
   |> pog.returning(decoder)
   |> pog.execute(db)
 }

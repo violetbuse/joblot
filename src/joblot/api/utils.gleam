@@ -3,7 +3,7 @@ import gleam/dict
 import gleam/dynamic/decode
 import gleam/http
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, None}
 import gleam/string
 import gleam/uri
 

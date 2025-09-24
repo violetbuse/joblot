@@ -1,8 +1,6 @@
 import glanoid
 import gleam/dict
 import gleam/erlang/process
-import gleam/int
-import gleam/io
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision

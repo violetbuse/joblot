@@ -1,12 +1,10 @@
-import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/http
 import gleam/json
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{None, Some}
 import gleam/result
-import gleam/uri
 import joblot/api/error
 import joblot/api/one_off_jobs/data
 import joblot/api/utils
@@ -145,7 +143,7 @@ pub fn handle_list_one_off_jobs(request: Request, db: DB) -> Response {
 
     let filter = data.filter_from_request(request)
 
-    use one_off_jobs <- result.try(data.get_one_off_jobs(db, cursor, filter))
+    use one_off_jobs <- result.try(data.list_one_off_jobs(db, cursor, filter))
     Ok(one_off_jobs)
   }
 

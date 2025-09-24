@@ -1,13 +1,13 @@
 import clockwork
 import glanoid
 import gleam/dict
-import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/function
 import gleam/http
+import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, Some}
 import gleam/result
 import gleam/uri
 import joblot/api/cron_jobs/sql
@@ -15,6 +15,7 @@ import joblot/api/error
 import joblot/hash
 import joblot/utils
 import pog
+import wisp.{type Request as WispRequest}
 
 pub type CronJob {
   CronJob(
@@ -136,7 +137,7 @@ pub fn create_cron_job(
   let connection = pog.named_connection(db)
 
   let assert Ok(nanoid) = glanoid.make_generator(glanoid.default_alphabet)
-  let id = "one_off_job_" <> nanoid(21)
+  let id = "cron_job_" <> nanoid(21)
   let hash = hash.create_shard_key_hash(id)
 
   let user_id = job.user_id |> option.unwrap("")
@@ -202,4 +203,200 @@ pub fn create_cron_job(
       )
     _ -> panic as "Attempted to create cron job but got multiple rows"
   }
+}
+
+pub type Filter {
+  Filter(user_id: Option(String), tenant_id: Option(String))
+}
+
+pub fn filter_from_request(request: WispRequest) -> Option(Filter) {
+  let query = wisp.get_query(request)
+  let user_id = query |> list.key_find("user_id") |> option.from_result
+  let tenant_id = query |> list.key_find("tenant_id") |> option.from_result
+  Some(Filter(user_id, tenant_id))
+}
+
+fn filter_user_id_like(filter: Option(Filter)) -> String {
+  filter
+  |> option.map(fn(filter) { filter.user_id })
+  |> option.flatten
+  |> option.unwrap("%")
+}
+
+fn filter_tenant_id_like(filter: Option(Filter)) -> String {
+  filter
+  |> option.map(fn(filter) { filter.tenant_id })
+  |> option.flatten
+  |> option.unwrap("%")
+}
+
+pub fn delete_cron_job(
+  db: process.Name(pog.Message),
+  id: String,
+  filter: Option(Filter),
+) -> Result(Option(CronJob), error.ApiError) {
+  let connection = pog.named_connection(db)
+  let user_id = filter_user_id_like(filter)
+  let tenant_id = filter_tenant_id_like(filter)
+
+  let got_row = get_cron_job(db, id, filter) |> option.from_result
+  let delete_result =
+    sql.delete_cron_job(connection, id, user_id, tenant_id)
+    |> result.map_error(error.from_pog_query_error)
+
+  delete_result
+  |> result.replace(got_row)
+}
+
+pub fn get_cron_job(
+  db: process.Name(pog.Message),
+  id: String,
+  filter: Option(Filter),
+) -> Result(CronJob, error.ApiError) {
+  let connection = pog.named_connection(db)
+  let user_id = filter_user_id_like(filter)
+  let tenant_id = filter_tenant_id_like(filter)
+
+  use pog.Returned(_, rows) <- result.try(
+    sql.get_cron_job(connection, id, user_id, tenant_id)
+    |> result.map_error(error.from_pog_query_error),
+  )
+
+  let ids = rows |> list.map(fn(row) { row.id })
+
+  use attempts <- result.try(get_attempts_for_jobs(db, ids))
+
+  case rows {
+    [item] -> {
+      let attempts = attempts |> dict.get(item.id) |> result.unwrap([])
+      use method <- result.try(
+        http.parse_method(item.method)
+        |> result.replace_error(error.InternalServerError),
+      )
+      use url <- result.try(
+        uri.parse(item.url) |> result.replace_error(error.InternalServerError),
+      )
+      use metadata <- result.try(utils.json_string_to_metadata(item.metadata))
+      Ok(CronJob(
+        id: item.id,
+        created_at: item.created_at,
+        request: RequestData(
+          method: method,
+          url: url,
+          headers: item.headers,
+          body: item.body,
+          timeout_ms: item.timeout_ms,
+          non_2xx_is_failure: item.non_2xx_is_failure,
+        ),
+        user_id: item.user_id |> option.Some,
+        tenant_id: item.tenant_id |> option.Some,
+        metadata: metadata,
+        cron: item.cron,
+        maximum_attempts: item.maximum_attempts,
+        attempts: attempts,
+      ))
+    }
+    [] -> Error(error.NotFoundError)
+    _ -> panic as "Attempted to get cron job but got multiple rows"
+  }
+}
+
+pub fn list_cron_jobs(
+  db: process.Name(pog.Message),
+  cursor: String,
+  filter: Option(Filter),
+) -> Result(List(CronJob), error.ApiError) {
+  let connection = pog.named_connection(db)
+  let user_id = filter_user_id_like(filter)
+  let tenant_id = filter_tenant_id_like(filter)
+
+  use pog.Returned(_, rows) <- result.try(
+    sql.list_cron_jobs(connection, user_id, tenant_id, cursor, 100)
+    |> result.map_error(error.from_pog_query_error),
+  )
+
+  let ids = rows |> list.map(fn(row) { row.id })
+
+  use attempts <- result.try(get_attempts_for_jobs(db, ids))
+
+  rows
+  |> list.map(fn(row) {
+    use method <- result.try(
+      http.parse_method(row.method)
+      |> result.replace_error(error.InternalServerError),
+    )
+    use url <- result.try(
+      uri.parse(row.url) |> result.replace_error(error.InternalServerError),
+    )
+    use metadata <- result.try(utils.json_string_to_metadata(row.metadata))
+    Ok(CronJob(
+      id: row.id,
+      created_at: row.created_at,
+      request: RequestData(
+        method: method,
+        url: url,
+        headers: row.headers,
+        body: row.body,
+        timeout_ms: row.timeout_ms,
+        non_2xx_is_failure: row.non_2xx_is_failure,
+      ),
+      user_id: row.user_id |> option.Some,
+      tenant_id: row.tenant_id |> option.Some,
+      metadata: metadata,
+      cron: row.cron,
+      maximum_attempts: row.maximum_attempts,
+      attempts: attempts |> dict.get(row.id) |> result.unwrap([]),
+    ))
+  })
+  |> result.all
+}
+
+fn get_attempts_for_jobs(
+  db: process.Name(pog.Message),
+  ids: List(String),
+) -> Result(dict.Dict(String, List(AttemptData)), error.ApiError) {
+  let connection = pog.named_connection(db)
+  use pog.Returned(_, error_rows) <- result.try(
+    sql.get_errored_attempts(connection, ids)
+    |> result.map_error(error.from_pog_query_error),
+  )
+  use pog.Returned(_, response_rows) <- result.try(
+    sql.get_responses(connection, ids)
+    |> result.map_error(error.from_pog_query_error),
+  )
+
+  let error_rows_attempts =
+    error_rows
+    |> list.map(fn(row) {
+      #(row.id, RequestError(row.planned_at, row.attempted_at, row.error))
+    })
+  let response_rows_attempts =
+    response_rows
+    |> list.map(fn(row) {
+      #(
+        row.id,
+        Response(
+          row.planned_at,
+          row.attempted_at,
+          ResponseData(
+            row.res_status_code,
+            row.res_headers,
+            row.res_body,
+            row.response_time_ms,
+          ),
+        ),
+      )
+    })
+
+  let attempts =
+    error_rows_attempts
+    |> list.append(response_rows_attempts)
+    |> list.group(fn(entry) { entry.0 })
+    |> dict.map_values(fn(_, list) {
+      list
+      |> list.map(fn(entry) { entry.1 })
+      |> list.sort(fn(a, b) { int.compare(a.attempted_at, b.attempted_at) })
+    })
+
+  Ok(attempts)
 }

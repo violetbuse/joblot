@@ -1,7 +1,6 @@
 import dot_env/env
 import gleam/bytes_tree
 import gleam/erlang/process
-import gleam/http
 import gleam/http/request
 import gleam/http/response
 import joblot/api/cron_jobs/handlers as cron_jobs

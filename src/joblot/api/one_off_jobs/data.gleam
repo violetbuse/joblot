@@ -3,9 +3,10 @@ import gleam/dict
 import gleam/erlang/process
 import gleam/function
 import gleam/http
+import gleam/int
 import gleam/json
 import gleam/list
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option, Some}
 import gleam/result
 import gleam/uri
 import joblot/api/error
@@ -304,7 +305,7 @@ pub fn get_one_off_job(
   }
 }
 
-pub fn get_one_off_jobs(
+pub fn list_one_off_jobs(
   db: process.Name(pog.Message),
   cursor: String,
   filter: Option(Filter),
@@ -314,7 +315,7 @@ pub fn get_one_off_jobs(
   let tenant_id = filter_tenant_id_like(filter)
 
   use pog.Returned(_, rows) <- result.try(
-    sql.get_one_off_jobs(connection, user_id, tenant_id, cursor, 100)
+    sql.list_one_off_jobs(connection, user_id, tenant_id, cursor, 100)
     |> result.map_error(error.from_pog_query_error),
   )
 
@@ -396,7 +397,11 @@ fn get_attempts_for_jobs(
     error_rows_attempts
     |> list.append(response_rows_attempts)
     |> list.group(fn(entry) { entry.0 })
-    |> dict.map_values(fn(_, list) { list |> list.map(fn(entry) { entry.1 }) })
+    |> dict.map_values(fn(_, list) {
+      list
+      |> list.map(fn(entry) { entry.1 })
+      |> list.sort(fn(a, b) { int.compare(a.attempted_at, b.attempted_at) })
+    })
 
   Ok(attempts)
 }
