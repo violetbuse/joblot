@@ -22,7 +22,7 @@ pub fn start_lock(
   manager: process.Name(LockMgrMessage),
 ) {
   actor.new_with_initialiser(5000, fn(subject) {
-    process.send_after(subject, heartbeat_interval_ms, Heartbeat)
+    process.send(subject, Heartbeat)
 
     let assert Ok(nanoid) = glanoid.make_generator(glanoid.default_alphabet)
     let nonce = nanoid(21)
@@ -228,6 +228,7 @@ fn handle_lock_mgr_message(
       }
     }
     RegisterLock(response_to, id, nonce, lock) -> {
+      echo #("RegisterLock", id, nonce, lock)
       let new_locks =
         dict.upsert(state.locks, id, fn(existing_option) {
           let should_replace = case existing_option {
@@ -267,9 +268,11 @@ fn handle_lock_mgr_message(
     GetLock(id, reply_to) -> {
       case dict.get(state.locks, id) {
         Error(_) -> {
+          echo #("GetLock", id, "None")
           process.send(reply_to, None)
         }
         Ok(#(_, lock)) -> {
+          echo #("GetLock", id, "Some")
           process.send(reply_to, Some(lock))
         }
       }

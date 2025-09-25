@@ -620,3 +620,24 @@ ORDER BY attempted_at ASC;"
   |> pog.returning(decoder)
   |> pog.execute(db)
 }
+
+/// Runs the `set_one_off_job_complete` query
+/// defined in `./src/joblot/instance/sql/set_one_off_job_complete.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn set_one_off_job_complete(
+  db: pog.Connection,
+  arg_1: String,
+) -> Result(pog.Returned(Nil), pog.QueryError) {
+  let decoder = decode.map(decode.dynamic, fn(_) { Nil })
+
+  "UPDATE one_off_jobs
+SET completed = true
+WHERE id = $1;"
+  |> pog.query
+  |> pog.parameter(pog.text(arg_1))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}

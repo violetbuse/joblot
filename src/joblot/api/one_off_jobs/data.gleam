@@ -9,6 +9,7 @@ import gleam/list
 import gleam/option.{type Option, Some}
 import gleam/result
 import gleam/uri
+import joblot/api/attempts
 import joblot/api/error
 import joblot/api/one_off_jobs/sql
 import joblot/hash
@@ -26,7 +27,7 @@ pub type OneOffJob {
     metadata: List(#(String, String)),
     planned_at: Int,
     maximum_attempts: Int,
-    attempts: List(AttemptData),
+    attempts: List(attempts.AttemptData),
     completed: Bool,
   )
 }
@@ -39,20 +40,6 @@ pub type RequestData {
     body: String,
     timeout_ms: Int,
     non_2xx_is_failure: Bool,
-  )
-}
-
-pub type AttemptData {
-  Response(planned_at: Int, attempted_at: Int, response: ResponseData)
-  RequestError(planned_at: Int, attempted_at: Int, error: String)
-}
-
-pub type ResponseData {
-  ResponseData(
-    status_code: Int,
-    headers: List(String),
-    body: String,
-    response_time_ms: Int,
   )
 }
 
@@ -69,7 +56,7 @@ pub fn one_off_job_json(job: OneOffJob) -> json.Json {
     ),
     #("planned_at", json.int(job.planned_at)),
     #("maximum_attempts", json.int(job.maximum_attempts)),
-    #("attempts", json.array(job.attempts, attempt_data_json)),
+    #("attempts", json.array(job.attempts, attempts.attempt_data_json)),
     #("completed", json.bool(job.completed)),
   ])
 }
@@ -83,36 +70,8 @@ fn request_data_json(request: RequestData) -> json.Json {
     #("url", json.string(url)),
     #("headers", json.array(request.headers, json.string)),
     #("body", json.string(request.body)),
-  ])
-}
-
-fn attempt_data_json(attempt: AttemptData) -> json.Json {
-  case attempt {
-    Response(planned_at, attempted_at, response) -> {
-      json.object([
-        #("type", json.string("Response")),
-        #("planned_at", json.int(planned_at)),
-        #("attempted_at", json.int(attempted_at)),
-        #("response", response_data_json(response)),
-      ])
-    }
-    RequestError(planned_at, attempted_at, error) -> {
-      json.object([
-        #("type", json.string("Error")),
-        #("planned_at", json.int(planned_at)),
-        #("attempted_at", json.int(attempted_at)),
-        #("error", json.string(error)),
-      ])
-    }
-  }
-}
-
-fn response_data_json(response: ResponseData) -> json.Json {
-  json.object([
-    #("status_code", json.int(response.status_code)),
-    #("headers", json.array(response.headers, json.string)),
-    #("body", json.string(response.body)),
-    #("response_time_ms", json.int(response.response_time_ms)),
+    #("timeout_ms", json.int(request.timeout_ms)),
+    #("non_2xx_is_failure", json.bool(request.non_2xx_is_failure)),
   ])
 }
 
@@ -266,7 +225,7 @@ pub fn get_one_off_job(
 
   let ids = rows |> list.map(fn(row) { row.id })
 
-  use attempts <- result.try(get_attempts_for_jobs(db, ids))
+  use attempts <- result.try(attempts.get_attempts_for_jobs(db, ids))
 
   case rows {
     [item] -> {
@@ -315,13 +274,13 @@ pub fn list_one_off_jobs(
   let tenant_id = filter_tenant_id_like(filter)
 
   use pog.Returned(_, rows) <- result.try(
-    sql.list_one_off_jobs(connection, user_id, tenant_id, cursor, 100)
+    sql.list_one_off_jobs(connection, user_id, tenant_id, cursor, 25)
     |> result.map_error(error.from_pog_query_error),
   )
 
   let ids = rows |> list.map(fn(row) { row.id })
 
-  use attempts <- result.try(get_attempts_for_jobs(db, ids))
+  use attempts <- result.try(attempts.get_attempts_for_jobs(db, ids))
 
   rows
   |> list.map(fn(row) {
@@ -354,54 +313,4 @@ pub fn list_one_off_jobs(
     ))
   })
   |> result.all
-}
-
-fn get_attempts_for_jobs(
-  db: process.Name(pog.Message),
-  ids: List(String),
-) -> Result(dict.Dict(String, List(AttemptData)), error.ApiError) {
-  let connection = pog.named_connection(db)
-  use pog.Returned(_, error_rows) <- result.try(
-    sql.get_errored_attempts(connection, ids)
-    |> result.map_error(error.from_pog_query_error),
-  )
-  use pog.Returned(_, response_rows) <- result.try(
-    sql.get_responses(connection, ids)
-    |> result.map_error(error.from_pog_query_error),
-  )
-
-  let error_rows_attempts =
-    error_rows
-    |> list.map(fn(row) {
-      #(row.id, RequestError(row.planned_at, row.attempted_at, row.error))
-    })
-  let response_rows_attempts =
-    response_rows
-    |> list.map(fn(row) {
-      #(
-        row.id,
-        Response(
-          row.planned_at,
-          row.attempted_at,
-          ResponseData(
-            status_code: row.res_status_code,
-            headers: row.res_headers,
-            body: row.res_body,
-            response_time_ms: row.response_time_ms,
-          ),
-        ),
-      )
-    })
-
-  let attempts =
-    error_rows_attempts
-    |> list.append(response_rows_attempts)
-    |> list.group(fn(entry) { entry.0 })
-    |> dict.map_values(fn(_, list) {
-      list
-      |> list.map(fn(entry) { entry.1 })
-      |> list.sort(fn(a, b) { int.compare(a.attempted_at, b.attempted_at) })
-    })
-
-  Ok(attempts)
 }
