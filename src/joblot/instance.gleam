@@ -1,6 +1,8 @@
 import gleam/erlang/process
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
+import joblot/instance/cron_instance
+import joblot/instance/one_off_instance
 import joblot/lock
 import pog
 
@@ -16,16 +18,46 @@ pub fn start(
 ) -> Result(process.Pid, actor.StartError) {
   let result =
     supervisor.new(supervisor.OneForOne)
-    |> supervisor.auto_shutdown(supervisor.AnySignificant)
     |> supervisor.add(lock.supervised(
       "instance_lock_" <> job_id.id,
       lock_manager,
       db,
     ))
+    |> try_add_cron_worker(job_id, db, lock_manager)
+    |> try_add_one_off_worker(job_id, db, lock_manager)
     |> supervisor.start
 
   case result {
     Error(error) -> Error(error)
     Ok(actor.Started(pid, _supervisor)) -> Ok(pid)
+  }
+}
+
+fn try_add_cron_worker(
+  supervisor: supervisor.Builder,
+  job_id: JobId,
+  db: process.Name(pog.Message),
+  lock_manager: process.Name(lock.LockMgrMessage),
+) -> supervisor.Builder {
+  case job_id {
+    Cron(id) ->
+      supervisor.add(supervisor, cron_instance.supervised(id, db, lock_manager))
+    OneTime(_id) -> supervisor
+  }
+}
+
+fn try_add_one_off_worker(
+  supervisor: supervisor.Builder,
+  job_id: JobId,
+  db: process.Name(pog.Message),
+  lock_manager: process.Name(lock.LockMgrMessage),
+) -> supervisor.Builder {
+  case job_id {
+    Cron(_id) -> supervisor
+    OneTime(id) ->
+      supervisor.add(
+        supervisor,
+        one_off_instance.supervised(id, db, lock_manager),
+      )
   }
 }

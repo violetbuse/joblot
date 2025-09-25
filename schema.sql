@@ -84,6 +84,7 @@ CREATE TABLE responses (
     res_status_code INTEGER NOT NULL,
     res_headers TEXT [] NOT NULL,
     res_body TEXT NOT NULL,
+    success BOOLEAN NOT NULL,
     -- http execution details
     response_time_ms INTEGER NOT NULL,
     PRIMARY KEY (id),
