@@ -1,4 +1,4 @@
-h1:KOnOJHAMpcu0BrI5PLLMjFyPTfkd+ACzbX0DqVRe7os=
+h1:m6Nn9xp/1XwOJy98ZIyWDLH62dwIHV86rCbhtZcs2xw=
 20250922133938_create-locks-table.sql h1:myv5atb2yNJEe8r9Ip2s/uhTQLeXHoNdsphU/f/YJ1Y=
 20250922135432_create-one-off-and-cron-jobs.sql h1:xFxCNSt6/Ui1IyOSFXMnaGrd80AmxwPjTh4TjVzpW6E=
 20250922135554_create-error-table.sql h1:xNyooy62NU4N8smAAPDrYzQS7Cq0+p+Hqbzw0L7+f5I=
@@ -7,3 +7,4 @@ h1:KOnOJHAMpcu0BrI5PLLMjFyPTfkd+ACzbX0DqVRe7os=
 20250922150818_locks-unique-constraint-add.sql h1:znQ/Up51C/8Ih3noILY/bk+IZV6AdBKk0IUgrqztc0U=
 20250923142805_remove-execute-at-from-cron-jobs.sql h1:/lNq//1Ij29BxiNnyfIajZ4ikzq+LD3QO/apO4dd5mg=
 20250925095043_add-success-to-responses.sql h1:54BvbwzYmpKx2VBzQD/HsUhVDbyIvg1moZhwyXkaoMc=
+20250925182305_added-request-data-to-errors.sql h1:v0iEuuboHg+HaatZDerYB4dtpP5IESUB7Kc+CSSaPoQ=

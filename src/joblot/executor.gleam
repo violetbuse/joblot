@@ -18,6 +18,7 @@ pub type ExecutorRequest {
     headers: List(String),
     body: String,
     timeout_ms: Int,
+    non_2xx_is_failure: Bool,
   )
 }
 

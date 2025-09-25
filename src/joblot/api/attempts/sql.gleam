@@ -24,6 +24,10 @@ pub type ListErroredAttemptsRow {
     one_off_job_id: Option(String),
     cron_job_id: Option(String),
     error: String,
+    method: String,
+    url: String,
+    req_headers: List(String),
+    req_body: String,
   )
 }
 
@@ -49,6 +53,10 @@ pub fn list_errored_attempts(
     use one_off_job_id <- decode.field(5, decode.optional(decode.string))
     use cron_job_id <- decode.field(6, decode.optional(decode.string))
     use error <- decode.field(7, decode.string)
+    use method <- decode.field(8, decode.string)
+    use url <- decode.field(9, decode.string)
+    use req_headers <- decode.field(10, decode.list(decode.string))
+    use req_body <- decode.field(11, decode.string)
     decode.success(ListErroredAttemptsRow(
       id:,
       planned_at:,
@@ -58,6 +66,10 @@ pub fn list_errored_attempts(
       one_off_job_id:,
       cron_job_id:,
       error:,
+      method:,
+      url:,
+      req_headers:,
+      req_body:,
     ))
   }
 
@@ -93,6 +105,10 @@ pub type ListErroredAttemptsForJobRow {
     one_off_job_id: Option(String),
     cron_job_id: Option(String),
     error: String,
+    method: String,
+    url: String,
+    req_headers: List(String),
+    req_body: String,
   )
 }
 
@@ -117,6 +133,10 @@ pub fn list_errored_attempts_for_job(
     use one_off_job_id <- decode.field(5, decode.optional(decode.string))
     use cron_job_id <- decode.field(6, decode.optional(decode.string))
     use error <- decode.field(7, decode.string)
+    use method <- decode.field(8, decode.string)
+    use url <- decode.field(9, decode.string)
+    use req_headers <- decode.field(10, decode.list(decode.string))
+    use req_body <- decode.field(11, decode.string)
     decode.success(ListErroredAttemptsForJobRow(
       id:,
       planned_at:,
@@ -126,6 +146,10 @@ pub fn list_errored_attempts_for_job(
       one_off_job_id:,
       cron_job_id:,
       error:,
+      method:,
+      url:,
+      req_headers:,
+      req_body:,
     ))
   }
 

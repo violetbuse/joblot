@@ -53,7 +53,7 @@ pub fn supervised(
 
 pub opaque type Message {
   Heartbeat
-  Execute(for_planned_at: Int, for_execute_at: Int)
+  Execute(for_planned_at: Int, for_try_at: Int)
 }
 
 type State {
@@ -69,8 +69,8 @@ type State {
 fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {
   case message {
     Heartbeat -> handle_heartbeat(state)
-    Execute(for_planned_at, for_execute_at) ->
-      handle_execute(state, for_planned_at, for_execute_at)
+    Execute(for_planned_at, for_try_at) ->
+      handle_execute(state, for_planned_at, for_try_at)
   }
 }
 
@@ -113,7 +113,7 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
 fn handle_execute(
   state: State,
   for_planned_at: Int,
-  for_execute_at: Int,
+  for_try_at: Int,
 ) -> actor.Next(State, Message) {
   let has_lock = lock.has_lock(state.lock_manager, state.lock_id)
   let connection = pog.named_connection(state.db)
@@ -136,7 +136,7 @@ fn handle_execute(
       maximum_delay_seconds,
     )
 
-  use <- bool.guard(retry_time != for_execute_at, actor.continue(state))
+  use <- bool.guard(retry_time != for_try_at, actor.continue(state))
 
   let request =
     executor.ExecutorRequest(
@@ -145,11 +145,26 @@ fn handle_execute(
       headers: job_data.headers,
       body: job_data.body,
       timeout_ms: job_data.timeout_ms,
+      non_2xx_is_failure: job_data.non_2xx_is_failure,
     )
 
-  let execution_result = executor.execute_request(request)
+  let current_time = utils.get_unix_timestamp()
 
-  todo as "save execution result in db"
+  let execution_result = executor.execute_request(request)
+  let save_data =
+    attempts.AttemptSaveData(
+      planned_at: job_data.execute_at,
+      attempted_at: current_time,
+      job_id: state.one_off_job_id,
+      job_type: attempts.OneOffJob,
+      user_id: job_data.user_id,
+      tenant_id: job_data.tenant_id,
+    )
+
+  let assert Ok(_) =
+    attempts.save_response(state.db, save_data, request, execution_result)
+
+  actor.continue(state)
 }
 
 fn get_info(state: State) -> #(sql.GetOneOffJobRow, List(attempts.Attempt)) {

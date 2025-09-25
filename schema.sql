@@ -105,6 +105,11 @@ CREATE TABLE errored_attempts (
     -- one-off job or cron job id
     one_off_job_id TEXT,
     cron_job_id TEXT,
+    -- http request fields in case the underlying changes
+    method TEXT NOT NULL,
+    url TEXT NOT NULL,
+    req_headers TEXT [] NOT NULL,
+    req_body TEXT NOT NULL,
     -- error details
     error TEXT NOT NULL,
     PRIMARY KEY (id),
