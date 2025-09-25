@@ -1,8 +1,12 @@
+import gleam/bool
 import gleam/erlang/process
+import gleam/float
 import gleam/int
 import gleam/list
+import gleam/option
 import gleam/result
 import joblot/instance/sql
+import joblot/utils
 import pog
 
 pub type Response {
@@ -61,4 +65,56 @@ pub fn get_attempts_for_planned_at(
     |> list.sort(fn(a, b) { int.compare(a.attempted_at, b.attempted_at) })
 
   Ok(attempts)
+}
+
+pub fn is_successful(attempt: Attempt) -> Bool {
+  case attempt {
+    SuccessfulRequest(..) -> True
+    FailedRequest(..) -> False
+    RequestError(..) -> False
+  }
+}
+
+pub type ShouldRetry {
+  IsAlreadySuccessful
+  MaximumAttemptsReached
+  CanRetry
+}
+
+pub fn should_retry(
+  attempts: List(Attempt),
+  maximum_attempts: Int,
+) -> ShouldRetry {
+  let hit_maximum_attempts = attempts |> list.length >= maximum_attempts
+  use <- bool.guard(hit_maximum_attempts, return: MaximumAttemptsReached)
+  let has_successful_attempt = attempts |> list.any(is_successful)
+  use <- bool.guard(has_successful_attempt, return: IsAlreadySuccessful)
+  CanRetry
+}
+
+/// delay in seconds
+/// factor is the factor by which the delay is multiplied
+/// maximum is the maximum delay in seconds
+pub fn next_retry_time(
+  attempts: List(Attempt),
+  planned_at: Int,
+  initial delay: Int,
+  factor factor: Float,
+  maximum maximum: Int,
+) -> Int {
+  let attempt_count = attempts |> list.length
+  let now = utils.get_unix_timestamp()
+  let last_attempt_time =
+    attempts
+    |> list.last
+    |> result.map(fn(attempt) { attempt.attempted_at })
+    |> result.unwrap(now)
+
+  use <- bool.guard(attempt_count == 0, return: planned_at)
+  let assert Ok(multiplicand) =
+    float.power(factor, attempt_count |> int.to_float)
+  let raw_delay = { delay |> int.to_float } *. multiplicand
+  let delay = int.clamp(float.round(raw_delay), delay, maximum)
+
+  last_attempt_time + delay
 }

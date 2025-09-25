@@ -13,12 +13,11 @@ pub type ExecutorError {
 
 pub type ExecutorRequest {
   ExecutorRequest(
-    method: http.Method,
-    url: uri.Uri,
+    method: String,
+    url: String,
     headers: List(String),
     body: String,
     timeout_ms: Int,
-    non_2xx_is_failure: Bool,
   )
 }
 
@@ -34,11 +33,6 @@ pub type ExecutorResponse {
 pub fn execute_request(
   request: ExecutorRequest,
 ) -> Result(ExecutorResponse, ExecutorError) {
-  io.println(
-    "Executing request: "
-    <> http.method_to_string(request.method)
-    <> " "
-    <> uri.to_string(request.url),
-  )
+  io.println("Executing request: " <> request.method <> " " <> request.url)
   Error(TimeoutError)
 }
