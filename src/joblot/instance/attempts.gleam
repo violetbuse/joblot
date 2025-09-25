@@ -26,9 +26,9 @@ pub type Response {
 }
 
 pub type Attempt {
-  SuccessfulRequest(attempted_at: Int, response: Response)
-  FailedRequest(attempted_at: Int, response: Response)
-  RequestError(attempted_at: Int, error: String)
+  SuccessfulRequest(attempted_at: Int, planned_at: Int, response: Response)
+  FailedRequest(attempted_at: Int, planned_at: Int, response: Response)
+  RequestError(attempted_at: Int, planned_at: Int, error: String)
 }
 
 pub fn get_attempts_for_planned_at(
@@ -50,7 +50,7 @@ pub fn get_attempts_for_planned_at(
 
   let error_attempts = {
     use item <- list.map(error_rows)
-    RequestError(item.attempted_at, item.error)
+    RequestError(item.attempted_at, item.planned_at, item.error)
   }
   let response_attempts = {
     use item <- list.map(response_rows)
@@ -62,8 +62,8 @@ pub fn get_attempts_for_planned_at(
         item.response_time_ms,
       )
     case item.success {
-      True -> SuccessfulRequest(item.attempted_at, response)
-      False -> FailedRequest(item.attempted_at, response)
+      True -> SuccessfulRequest(item.attempted_at, item.planned_at, response)
+      False -> FailedRequest(item.attempted_at, item.planned_at, response)
     }
   }
 
@@ -209,4 +209,14 @@ pub fn save_response(
       |> result.replace(Nil)
     }
   }
+}
+
+pub fn latest_planned_at(
+  db: process.Name(pog.Message),
+  job_id: String,
+) -> Result(Int, pog.QueryError) {
+  let connection = pog.named_connection(db)
+  let assert Ok(pog.Returned(_, [row])) =
+    sql.cron_latest_planned(connection, job_id)
+  Ok(row.latest_planned_at)
 }

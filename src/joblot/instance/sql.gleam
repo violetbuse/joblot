@@ -8,6 +8,52 @@ import gleam/dynamic/decode
 import gleam/option.{type Option}
 import pog
 
+/// A row you get from running the `cron_latest_planned` query
+/// defined in `./src/joblot/instance/sql/cron_latest_planned.sql`.
+///
+/// > 🐿️ This type definition was generated automatically using v4.4.1 of the
+/// > [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub type CronLatestPlannedRow {
+  CronLatestPlannedRow(latest_planned_at: Int)
+}
+
+/// Runs the `cron_latest_planned` query
+/// defined in `./src/joblot/instance/sql/cron_latest_planned.sql`.
+///
+/// > 🐿️ This function was generated automatically using v4.4.1 of
+/// > the [squirrel package](https://github.com/giacomocavalieri/squirrel).
+///
+pub fn cron_latest_planned(
+  db: pog.Connection,
+  arg_1: String,
+) -> Result(pog.Returned(CronLatestPlannedRow), pog.QueryError) {
+  let decoder = {
+    use latest_planned_at <- decode.field(0, decode.int)
+    decode.success(CronLatestPlannedRow(latest_planned_at:))
+  }
+
+  "SELECT COALESCE(
+        GREATEST(
+            (
+                SELECT MAX(planned_at)
+                FROM responses
+                WHERE cron_job_id = $1
+            ),
+            (
+                SELECT MAX(planned_at)
+                FROM errored_attempts
+                WHERE cron_job_id = $1
+            )
+        ),
+        0
+    ) AS latest_planned_at;"
+  |> pog.query
+  |> pog.parameter(pog.text(arg_1))
+  |> pog.returning(decoder)
+  |> pog.execute(db)
+}
+
 /// A row you get from running the `get_cron_job` query
 /// defined in `./src/joblot/instance/sql/get_cron_job.sql`.
 ///

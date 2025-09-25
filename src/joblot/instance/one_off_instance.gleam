@@ -1,5 +1,6 @@
 import gleam/bool
 import gleam/erlang/process
+import gleam/float
 import gleam/http
 import gleam/int
 import gleam/otp/actor
@@ -75,12 +76,12 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
 }
 
 fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
-  echo #("handle_heartbeat")
   let has_lock = lock.has_lock(state.lock_manager, state.lock_id)
 
-  echo #("has_lock", state.lock_id, has_lock)
-
-  process.send_after(state.self, heartbeat_interval_ms, Heartbeat)
+  let next_heartbeat_time =
+    { int.to_float(heartbeat_interval_ms) *. { float.random() +. 0.5 } }
+    |> float.round
+  process.send_after(state.self, next_heartbeat_time, Heartbeat)
 
   use <- bool.guard(!has_lock, return: actor.continue(state))
 
@@ -102,7 +103,9 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
   let not_successful_yet = should_retry == attempts.CanRetry
   let current_time = utils.get_unix_timestamp()
   let next_heartbeat_time =
-    current_time + heartbeat_interval_ms / 1000 - pre_heartbeat_buffer_ms / 1000
+    current_time
+    + { { heartbeat_interval_ms / 2 } / 1000 }
+    - { pre_heartbeat_buffer_ms / 1000 }
   let next_retry_time =
     attempts.next_retry_time(
       attempts,
@@ -113,11 +116,6 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
     )
   let should_execute =
     not_successful_yet && next_retry_time < next_heartbeat_time
-
-  echo #("not_successful_yet", not_successful_yet)
-  echo #("next_retry_time", next_retry_time)
-  echo #("next_heartbeat_time", next_heartbeat_time)
-  echo #("should_execute", should_execute)
 
   use <- bool.guard(!should_execute, return: actor.continue(state))
 
@@ -138,9 +136,6 @@ fn handle_execute(
 ) -> actor.Next(State, Message) {
   let has_lock = lock.has_lock(state.lock_manager, state.lock_id)
 
-  echo #("has_lock", state.lock_id, has_lock)
-  echo #("trying to execute")
-
   use <- bool.guard(!has_lock, return: actor.continue(state))
 
   let #(job_data, attempts) = get_info(state)
@@ -160,8 +155,6 @@ fn handle_execute(
     )
 
   let should_execute = retry_time == for_try_at
-
-  echo #("should_execute", should_execute, retry_time, for_try_at)
 
   use <- bool.guard(!should_execute, return: actor.continue(state))
 
@@ -189,10 +182,8 @@ fn handle_execute(
     )
 
   let assert Ok(_) = {
-    echo #("saving response")
     let save_result =
       attempts.save_response(state.db, save_data, request, execution_result)
-    echo #("save_result", save_result)
     save_result
   }
 
