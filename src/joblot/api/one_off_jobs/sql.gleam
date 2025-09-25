@@ -335,6 +335,7 @@ pub type GetResponsesRow {
     res_headers: List(String),
     res_body: String,
     response_time_ms: Int,
+    success: Bool,
   )
 }
 
@@ -364,6 +365,7 @@ pub fn get_responses(
     use res_headers <- decode.field(12, decode.list(decode.string))
     use res_body <- decode.field(13, decode.string)
     use response_time_ms <- decode.field(14, decode.int)
+    use success <- decode.field(15, decode.bool)
     decode.success(GetResponsesRow(
       id:,
       planned_at:,
@@ -380,6 +382,7 @@ pub fn get_responses(
       res_headers:,
       res_body:,
       response_time_ms:,
+      success:,
     ))
   }
 

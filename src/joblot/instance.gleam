@@ -16,15 +16,13 @@ pub fn start(
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
 ) -> Result(process.Pid, actor.StartError) {
+  let lock_id = "instance_lock_" <> job_id.id
+
   let result =
     supervisor.new(supervisor.OneForOne)
-    |> supervisor.add(lock.supervised(
-      "instance_lock_" <> job_id.id,
-      lock_manager,
-      db,
-    ))
-    |> try_add_cron_worker(job_id, db, lock_manager)
-    |> try_add_one_off_worker(job_id, db, lock_manager)
+    |> supervisor.add(lock.supervised(lock_id, lock_manager, db))
+    |> try_add_cron_worker(job_id, db, lock_manager, lock_id)
+    |> try_add_one_off_worker(job_id, db, lock_manager, lock_id)
     |> supervisor.start
 
   case result {
@@ -38,10 +36,14 @@ fn try_add_cron_worker(
   job_id: JobId,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  lock_id: String,
 ) -> supervisor.Builder {
   case job_id {
     Cron(id) ->
-      supervisor.add(supervisor, cron_instance.supervised(id, db, lock_manager))
+      supervisor.add(
+        supervisor,
+        cron_instance.supervised(id, db, lock_manager, lock_id),
+      )
     OneTime(_id) -> supervisor
   }
 }
@@ -51,13 +53,14 @@ fn try_add_one_off_worker(
   job_id: JobId,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  lock_id: String,
 ) -> supervisor.Builder {
   case job_id {
     Cron(_id) -> supervisor
     OneTime(id) ->
       supervisor.add(
         supervisor,
-        one_off_instance.supervised(id, db, lock_manager),
+        one_off_instance.supervised(id, db, lock_manager, lock_id),
       )
   }
 }
