@@ -33,7 +33,12 @@ pub fn start(
   lock_id: String,
 ) {
   actor.new_with_initialiser(5000, fn(subject) {
-    process.send_after(subject, 1000, Heartbeat)
+    let initial_heartbeat_delay_ms = 10_000.0 *. { float.random() +. 0.5 }
+    process.send_after(
+      subject,
+      initial_heartbeat_delay_ms |> float.round,
+      Heartbeat,
+    )
 
     actor.initialised(State(subject, db, lock_manager, lock_id, id))
     |> actor.returning(subject)
@@ -83,43 +88,28 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
     |> float.round
   process.send_after(state.self, next_heartbeat_time, Heartbeat)
 
-  use <- bool.guard(!has_lock, return: actor.continue(state))
+  use <- bool.guard(when: !has_lock, return: actor.continue(state))
 
   let #(job_data, attempts) = get_info(state)
+
+  use <- bool.guard(when: job_data.completed, return: actor.continue(state))
+
+  mark_successful_if_completed(state, job_data, attempts)
+
   let should_retry = attempts.should_retry(attempts, job_data.maximum_attempts)
 
-  let _ = case should_retry {
-    attempts.CanRetry -> Nil
-    _ -> {
-      let assert Ok(_) =
-        sql.set_one_off_job_complete(
-          pog.named_connection(state.db),
-          state.one_off_job_id,
-        )
-      Nil
-    }
-  }
+  use <- bool.guard(
+    when: should_retry != attempts.CanRetry,
+    return: actor.continue(state),
+  )
 
-  let not_successful_yet = should_retry == attempts.CanRetry
+  let next_retry_time = get_next_execution_time(job_data, attempts)
+  let should_execute = next_execution_time_within_tick(next_retry_time)
+  use <- bool.guard(when: !should_execute, return: actor.continue(state))
+
   let current_time = utils.get_unix_timestamp()
-  let next_heartbeat_time =
-    current_time
-    + { { heartbeat_interval_ms / 2 } / 1000 }
-    - { pre_heartbeat_buffer_ms / 1000 }
-  let next_retry_time =
-    attempts.next_retry_time(
-      attempts,
-      job_data.execute_at,
-      initial_delay_seconds,
-      factor,
-      maximum_delay_seconds,
-    )
-  let should_execute =
-    not_successful_yet && next_retry_time < next_heartbeat_time
-
-  use <- bool.guard(!should_execute, return: actor.continue(state))
-
   let ms_to_execute = { next_retry_time - current_time } * 1000
+
   process.send_after(
     state.self,
     int.max(ms_to_execute, 0),
@@ -141,22 +131,16 @@ fn handle_execute(
   let #(job_data, attempts) = get_info(state)
 
   use <- bool.guard(
-    job_data.execute_at != for_planned_at,
+    when: job_data.execute_at != for_planned_at,
     return: actor.continue(state),
   )
 
-  let retry_time =
-    attempts.next_retry_time(
-      attempts,
-      job_data.execute_at,
-      initial_delay_seconds,
-      factor,
-      maximum_delay_seconds,
-    )
+  let retry_time = get_next_execution_time(job_data, attempts)
 
-  let should_execute = retry_time == for_try_at
-
-  use <- bool.guard(!should_execute, return: actor.continue(state))
+  use <- bool.guard(
+    when: retry_time != for_try_at,
+    return: actor.continue(state),
+  )
 
   let request =
     executor.ExecutorRequest(
@@ -171,6 +155,7 @@ fn handle_execute(
   let current_time = utils.get_unix_timestamp()
 
   let execution_result = executor.execute_request(request)
+
   let save_data =
     attempts.AttemptSaveData(
       planned_at: job_data.execute_at,
@@ -190,6 +175,30 @@ fn handle_execute(
   actor.continue(state)
 }
 
+fn get_next_execution_time(
+  job_data: sql.GetOneOffJobRow,
+  attempts: List(attempts.Attempt),
+) -> Int {
+  let next_execution_time =
+    attempts.next_retry_time(
+      attempts,
+      job_data.execute_at,
+      initial_delay_seconds,
+      factor,
+      maximum_delay_seconds,
+    )
+  next_execution_time
+}
+
+fn next_execution_time_within_tick(execution_time: Int) -> Bool {
+  let current_time = utils.get_unix_timestamp()
+  let time_to_next_tick =
+    current_time
+    + { { heartbeat_interval_ms / 2 } / 1000 }
+    - { pre_heartbeat_buffer_ms / 1000 }
+  execution_time < time_to_next_tick
+}
+
 fn get_info(state: State) -> #(sql.GetOneOffJobRow, List(attempts.Attempt)) {
   let connection = pog.named_connection(state.db)
   let assert Ok(pog.Returned(_, [job_data_row])) =
@@ -201,4 +210,22 @@ fn get_info(state: State) -> #(sql.GetOneOffJobRow, List(attempts.Attempt)) {
       job_data_row.execute_at,
     )
   #(job_data_row, attempts)
+}
+
+fn mark_successful_if_completed(
+  state: State,
+  job_data: sql.GetOneOffJobRow,
+  attempts: List(attempts.Attempt),
+) -> Nil {
+  case attempts.should_retry(attempts, job_data.maximum_attempts) {
+    attempts.CanRetry -> {
+      let assert Ok(_) =
+        sql.set_one_off_job_complete(
+          pog.named_connection(state.db),
+          state.one_off_job_id,
+        )
+      Nil
+    }
+    _ -> Nil
+  }
 }
