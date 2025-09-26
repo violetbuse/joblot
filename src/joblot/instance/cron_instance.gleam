@@ -16,15 +16,15 @@ import joblot/lock
 import joblot/utils
 import pog
 
-const heartbeat_interval_ms = 30_000
+const heartbeat_interval_ms = 25_000
 
-const pre_heartbeat_buffer_ms = 5000
+const pre_heartbeat_buffer_ms = 500
 
 /// initial retry delay in seconds (1 minute)
 const initial_delay_seconds = 60
 
 /// exponential retry factor
-const factor = 2.0
+const factor = 1.5
 
 /// maximum retry delay in seconds (24 hours)
 const maximum_delay_seconds = 86_400
@@ -220,7 +220,7 @@ fn next_execution_time_within_tick(execution_time: Int) -> Bool {
   let current_time = utils.get_unix_timestamp()
   let time_to_next_tick =
     current_time
-    + { { heartbeat_interval_ms / 2 } / 1000 }
+    + { heartbeat_interval_ms / 1000 }
     - { pre_heartbeat_buffer_ms / 1000 }
   execution_time < time_to_next_tick
 }
