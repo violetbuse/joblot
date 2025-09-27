@@ -1,6 +1,7 @@
 import gleam/erlang/process
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
+import joblot/instance/builder
 import joblot/instance/cron_instance
 import joblot/instance/one_off_instance
 import joblot/lock
@@ -39,11 +40,14 @@ fn try_add_cron_worker(
   lock_id: String,
 ) -> supervisor.Builder {
   case job_id {
-    Cron(id) ->
-      supervisor.add(
-        supervisor,
-        cron_instance.supervised(id, db, lock_manager, lock_id),
-      )
+    Cron(id) -> {
+      builder.new()
+      |> builder.next_execution_time(cron_instance.get_next_execution_time)
+      |> builder.next_request_data(cron_instance.get_next_request_data)
+      |> builder.post_execution_hook(cron_instance.post_execution_hook)
+      |> builder.supervised(id, lock_id, db, lock_manager)
+      |> supervisor.add(supervisor, _)
+    }
     OneTime(_id) -> supervisor
   }
 }
@@ -57,10 +61,13 @@ fn try_add_one_off_worker(
 ) -> supervisor.Builder {
   case job_id {
     Cron(_id) -> supervisor
-    OneTime(id) ->
-      supervisor.add(
-        supervisor,
-        one_off_instance.supervised(id, db, lock_manager, lock_id),
-      )
+    OneTime(id) -> {
+      builder.new()
+      |> builder.next_execution_time(one_off_instance.get_next_execution_time)
+      |> builder.next_request_data(one_off_instance.get_next_request_data)
+      |> builder.post_execution_hook(one_off_instance.post_execution_hook)
+      |> builder.supervised(id, lock_id, db, lock_manager)
+      |> supervisor.add(supervisor, _)
+    }
   }
 }

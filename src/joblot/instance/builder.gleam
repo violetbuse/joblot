@@ -5,7 +5,6 @@ import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision
-import gleam/result
 import joblot/executor
 import joblot/instance/attempts
 import joblot/lock
@@ -29,7 +28,7 @@ pub type NextExecutionResult {
 }
 
 pub type GetNextExecutionTime =
-  fn(String, process.Name(pog.Message)) -> Result(NextExecutionResult, String)
+  fn(State) -> Result(NextExecutionResult, String)
 
 pub type GetAttemptSaveData =
   fn(Int) -> attempts.AttemptSaveData
@@ -42,7 +41,7 @@ pub type NextRequestDataResult {
 }
 
 pub type GetNextRequestData =
-  fn(String, process.Name(pog.Message)) -> Result(NextRequestDataResult, String)
+  fn(State) -> Result(NextRequestDataResult, String)
 
 pub type PostExecutionHook =
   fn(
@@ -110,7 +109,7 @@ pub fn maximum_delay_seconds(
   Builder(..builder, maximum_delay_seconds: maximum_delay_seconds)
 }
 
-type State {
+pub type State {
   State(
     self: process.Subject(Message),
     db: process.Name(pog.Message),
@@ -155,7 +154,7 @@ fn new_state(
   )
 }
 
-type Message {
+pub type Message {
   Heartbeat
   Execute(for_planned_at: Int, for_try_at: Int)
 }
@@ -218,8 +217,7 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
 
   use <- bool.guard(when: !has_lock, return: actor.continue(state))
 
-  let assert Ok(next_execution_time) =
-    state.get_next_execution_time(state.id, state.db)
+  let assert Ok(next_execution_time) = state.get_next_execution_time(state)
 
   let within_next_tick =
     next_execution_time_within_tick(state, next_execution_time.execute_at)
@@ -269,7 +267,7 @@ fn handle_execute(
   use <- bool.guard(when: !has_lock, return: actor.continue(state))
 
   let assert Ok(NextExecutionResult(planned_at, execute_at)) =
-    state.get_next_execution_time(state.id, state.db)
+    state.get_next_execution_time(state)
 
   use <- bool.guard(
     when: planned_at != for_planned_at,
@@ -281,7 +279,7 @@ fn handle_execute(
   )
 
   let assert Ok(NextRequestDataResult(request, get_attempt_save_data)) =
-    state.get_next_request_data(state.id, state.db)
+    state.get_next_request_data(state)
 
   let current_time = utils.get_unix_timestamp()
 
