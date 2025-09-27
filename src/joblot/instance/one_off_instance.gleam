@@ -14,19 +14,6 @@ import joblot/lock
 import joblot/utils
 import pog
 
-const heartbeat_interval_ms = 25_000
-
-const pre_heartbeat_buffer_ms = 500
-
-/// initial retry delay in seconds (1 minute)
-const initial_delay_seconds = 60
-
-/// exponential retry factor
-const factor = 1.5
-
-/// maximum retry delay in seconds (24 hours)
-const maximum_delay_seconds = 86_400
-
 pub fn get_next_execution_time(
   state: builder.State,
 ) -> Result(builder.NextExecutionResult, String) {
