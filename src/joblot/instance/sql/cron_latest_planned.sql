@@ -9,6 +9,11 @@ SELECT COALESCE(
                 SELECT MAX(planned_at)
                 FROM errored_attempts
                 WHERE cron_job_id = $1
+            ),
+            (
+                SELECT MAX(created_at)
+                FROM cron_jobs
+                WHERE id = $1
             )
         ),
         0

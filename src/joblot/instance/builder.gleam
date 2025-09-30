@@ -13,6 +13,7 @@ import pog
 
 pub opaque type Builder {
   Builder(
+    pre_execute_hook: Option(PreExecuteHook),
     get_next_execution_time: Option(GetNextExecutionTime),
     get_next_request_data: Option(GetNextRequestData),
     post_execution_hook: Option(PostExecutionHook),
@@ -23,6 +24,13 @@ pub opaque type Builder {
   )
 }
 
+pub type PreExecuteHook =
+  fn(State) -> Result(Nil, String)
+
+fn default_pre_execute_hook(_state: State) -> Result(Nil, String) {
+  Ok(Nil)
+}
+
 pub type NextExecutionResult {
   NextExecutionResult(planned_at: Int, execute_at: Int)
 }
@@ -31,7 +39,7 @@ pub type GetNextExecutionTime =
   fn(State) -> Result(NextExecutionResult, String)
 
 pub type GetAttemptSaveData =
-  fn(Int) -> attempts.AttemptSaveData
+  fn(Int, Int) -> attempts.AttemptSaveData
 
 pub type NextRequestDataResult {
   NextRequestDataResult(
@@ -45,22 +53,38 @@ pub type GetNextRequestData =
 
 pub type PostExecutionHook =
   fn(
-    process.Name(pog.Message),
+    State,
     executor.ExecutorRequest,
     Result(executor.ExecutorResponse, executor.ExecutorError),
   ) ->
     Result(Nil, String)
 
+fn default_post_execution_hook(
+  _state: State,
+  _request: executor.ExecutorRequest,
+  _execution_result: Result(executor.ExecutorResponse, executor.ExecutorError),
+) -> Result(Nil, String) {
+  Ok(Nil)
+}
+
 pub fn new() -> Builder {
   Builder(
+    pre_execute_hook: Some(default_pre_execute_hook),
     get_next_execution_time: None,
     get_next_request_data: None,
-    post_execution_hook: None,
+    post_execution_hook: Some(default_post_execution_hook),
     heartbeat_interval_ms: 30_000,
     initial_delay_seconds: 60,
     factor: 1.5,
     maximum_delay_seconds: 86_400,
   )
+}
+
+pub fn pre_execute_hook(
+  builder: Builder,
+  pre_execute_hook: PreExecuteHook,
+) -> Builder {
+  Builder(..builder, pre_execute_hook: Some(pre_execute_hook))
 }
 
 pub fn next_execution_time(
@@ -116,6 +140,7 @@ pub type State {
     lock_manager: process.Name(lock.LockMgrMessage),
     id: String,
     lock_id: String,
+    pre_execute_hook: PreExecuteHook,
     get_next_execution_time: GetNextExecutionTime,
     get_next_request_data: GetNextRequestData,
     post_execution_hook: PostExecutionHook,
@@ -134,6 +159,7 @@ fn new_state(
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
 ) -> State {
+  let assert Some(pre_execute_hook) = builder.pre_execute_hook
   let assert Some(get_next_execution_time) = builder.get_next_execution_time
   let assert Some(get_next_request_data) = builder.get_next_request_data
   let assert Some(post_execution_hook) = builder.post_execution_hook
@@ -144,6 +170,7 @@ fn new_state(
     lock_manager: lock_manager,
     id: id,
     lock_id: lock_id,
+    pre_execute_hook: pre_execute_hook,
     get_next_execution_time: get_next_execution_time,
     get_next_request_data: get_next_request_data,
     post_execution_hook: post_execution_hook,
@@ -217,6 +244,8 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
 
   use <- bool.guard(when: !has_lock, return: actor.continue(state))
 
+  let assert Ok(_) = state.pre_execute_hook(state)
+
   let assert Ok(next_execution_time) = state.get_next_execution_time(state)
 
   let within_next_tick =
@@ -285,13 +314,12 @@ fn handle_execute(
 
   let execution_result = executor.execute_request(request)
 
-  let save_data = get_attempt_save_data(current_time)
+  let save_data = get_attempt_save_data(for_planned_at, current_time)
 
   let assert Ok(_) =
     attempts.save_response(state.db, save_data, request, execution_result)
 
-  let assert Ok(_) =
-    state.post_execution_hook(state.db, request, execution_result)
+  let assert Ok(_) = state.post_execution_hook(state, request, execution_result)
 
   actor.continue(state)
 }

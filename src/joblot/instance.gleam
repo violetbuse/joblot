@@ -44,7 +44,6 @@ fn try_add_cron_worker(
       builder.new()
       |> builder.next_execution_time(cron_instance.get_next_execution_time)
       |> builder.next_request_data(cron_instance.get_next_request_data)
-      |> builder.post_execution_hook(cron_instance.post_execution_hook)
       |> builder.supervised(id, lock_id, db, lock_manager)
       |> supervisor.add(supervisor, _)
     }

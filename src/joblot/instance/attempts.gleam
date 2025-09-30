@@ -110,12 +110,11 @@ pub fn next_retry_time(
   maximum maximum: Int,
 ) -> Int {
   let attempt_count = attempts |> list.length
-  let now = utils.get_unix_timestamp()
   let last_attempt_time =
     attempts
     |> list.last
     |> result.map(fn(attempt) { attempt.attempted_at })
-    |> result.unwrap(now)
+    |> result.unwrap(planned_at)
 
   use <- bool.guard(attempt_count == 0, return: planned_at)
   let assert Ok(multiplicand) =
@@ -211,12 +210,9 @@ pub fn save_response(
   }
 }
 
-pub fn latest_planned_at(
-  db: process.Name(pog.Message),
-  job_id: String,
-) -> Result(Int, pog.QueryError) {
+pub fn latest_planned_at(db: process.Name(pog.Message), job_id: String) -> Int {
   let connection = pog.named_connection(db)
   let assert Ok(pog.Returned(_, [row])) =
     sql.cron_latest_planned(connection, job_id)
-  Ok(row.latest_planned_at)
+  row.latest_planned_at
 }
