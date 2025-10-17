@@ -3,6 +3,7 @@ import gleam/erlang/process
 import gleam/option
 import gleam/otp/actor
 import gleam/otp/supervision
+import gleam/result
 import joblot/cache/builder
 import pog
 
@@ -43,6 +44,13 @@ pub fn pubsub_category(
   category: String,
 ) -> Builder(datatype) {
   Builder(..builder, pubsub_category: option.Some(category))
+}
+
+pub fn heartbeat_ms(
+  builder: Builder(datatype),
+  ms heartbeat: Int,
+) -> Builder(datatype) {
+  Builder(..builder, heartbeat_ms: heartbeat)
 }
 
 pub type Message(datatype) {
@@ -138,22 +146,36 @@ fn handle_get_data(
   let _ =
     process.spawn(fn() {
       let cache_instance = case existing {
-        Ok(subject) -> subject
-        Error(_) -> {
-          let assert Ok(actor.Started(data: subject, ..)) =
-            builder.new()
-            |> builder.pubsub_category(state.pubsub_category)
-            |> builder.get_data(state.get_data)
-            |> builder.heartbeat_hook(heartbeat_hook(state.name))
-            |> builder.heartbeat_ms(state.instance_heartbeat_ms)
-            |> builder.start(id, state.db)
-
-          subject
+        Ok(subject) -> {
+          case
+            process.subject_owner(subject)
+            |> result.map(process.is_alive)
+            |> result.unwrap(False)
+          {
+            True -> subject
+            False -> start_cache_instance(id, state)
+          }
         }
+        Error(_) -> start_cache_instance(id, state)
       }
 
       process.send(cache_instance, builder.GetData(reply_with))
     })
 
   actor.continue(state)
+}
+
+fn start_cache_instance(
+  id: String,
+  state: State(datatype),
+) -> process.Subject(builder.Message(datatype)) {
+  let assert Ok(actor.Started(data: subject, ..)) =
+    builder.new()
+    |> builder.pubsub_category(state.pubsub_category)
+    |> builder.get_data(state.get_data)
+    |> builder.heartbeat_hook(heartbeat_hook(state.name))
+    |> builder.heartbeat_ms(state.instance_heartbeat_ms)
+    |> builder.start(id, state.db)
+
+  subject
 }
