@@ -5,6 +5,8 @@ import gleam/erlang/process
 import gleam/io
 import gleam/otp/static_supervisor as supervisor
 import joblot/api
+import joblot/cache/cron as cron_cache
+import joblot/cache/one_off_jobs as one_off_cache
 import joblot/lock
 import joblot/reconciler
 import joblot/registry
@@ -23,6 +25,9 @@ pub fn main() {
   let registry_name = process.new_name("registry")
   let lock_manager_name = process.new_name("lock_manager")
 
+  let one_off_jobs_cache_name = process.new_name("one_off_jobs_cache")
+  let cron_jobs_cache_name = process.new_name("cron_jobs_cache")
+
   let db_url =
     env.get_string_or(
       "DATABASE_URL",
@@ -40,6 +45,11 @@ pub fn main() {
     |> supervisor.add(pool_child)
     |> supervisor.add(api.supervised(pool_name))
     |> supervisor.add(target.supervised(target_name))
+    |> supervisor.add(cron_cache.supervised(cron_jobs_cache_name, pool_name))
+    |> supervisor.add(one_off_cache.supervised(
+      one_off_jobs_cache_name,
+      pool_name,
+    ))
     |> supervisor.add(registry.supervised(
       registry_name,
       pool_name,
