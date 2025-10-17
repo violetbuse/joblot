@@ -3,7 +3,6 @@ import gleam/dict
 import gleam/erlang/process
 import gleam/function
 import gleam/http
-import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, Some}

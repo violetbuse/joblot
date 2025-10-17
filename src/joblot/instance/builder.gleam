@@ -223,7 +223,11 @@ fn initializer(
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
 ) {
-  new_state(process_subject, builder, id, lock_id, db, lock_manager)
+  let state = new_state(process_subject, builder, id, lock_id, db, lock_manager)
+
+  process.send_after(state.self, jitter_heartbeat_ms(state), Heartbeat)
+
+  state
   |> actor.initialised()
   |> actor.returning(Nil)
   |> Ok

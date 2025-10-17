@@ -1,8 +1,4 @@
-import gleam/http
-import gleam/http/request
-import gleam/http/response
 import gleam/io
-import gleam/uri
 
 pub type ExecutorError {
   TimeoutError

@@ -4,11 +4,9 @@ import gleam/erlang/process
 import gleam/float
 import gleam/int
 import gleam/list
-import gleam/option
 import gleam/result
 import joblot/executor
 import joblot/instance/sql
-import joblot/utils
 import pog
 
 pub type JobType {
