@@ -6,6 +6,8 @@ import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
 import gleam/set
+import joblot/cache/cron as cron_cache
+import joblot/cache/one_off_jobs as one_off_cache
 import joblot/instance
 import joblot/lock
 import pog
@@ -16,10 +18,21 @@ pub fn start_registry(
   name: process.Name(Message),
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
 ) {
   actor.new_with_initialiser(5000, fn(subject) {
     process.send_after(subject, test_instances_interval, TestInstances)
-    let state = State(subject, db, lock_manager, dict.new(), dict.new())
+    let state =
+      State(
+        subject,
+        db,
+        lock_manager,
+        cron_cache,
+        one_off_cache,
+        dict.new(),
+        dict.new(),
+      )
 
     let selector =
       process.new_selector()
@@ -43,8 +56,12 @@ pub fn supervised(
   name: process.Name(Message),
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
 ) {
-  supervision.worker(fn() { start_registry(name, db, lock_manager) })
+  supervision.worker(fn() {
+    start_registry(name, db, lock_manager, cron_cache, one_off_cache)
+  })
 }
 
 type InstanceInfo {
@@ -56,6 +73,8 @@ type State {
     self: process.Subject(Message),
     db: process.Name(pog.Message),
     lock_manager: process.Name(lock.LockMgrMessage),
+    cron_cache: process.Name(cron_cache.Message),
+    one_off_cache: process.Name(one_off_cache.Message),
     instances: Dict(process.Pid, InstanceInfo),
     jobid_index: Dict(instance.JobId, process.Pid),
   )
@@ -85,7 +104,13 @@ fn replace_instance(
   pid: process.Pid,
 ) -> Result(State, String) {
   use supervisor_pid <- result.try(
-    instance.start(job_id, state.db, state.lock_manager)
+    instance.start(
+      job_id,
+      state.db,
+      state.lock_manager,
+      state.cron_cache,
+      state.one_off_cache,
+    )
     |> result.replace_error("Failed to start replacement instance"),
   )
 
@@ -184,7 +209,13 @@ fn handle_add_instance(
       Ok(_existing_instance) -> Ok(state)
       Error(_) -> {
         use pid <- result.try(
-          instance.start(job_id, state.db, state.lock_manager)
+          instance.start(
+            job_id,
+            state.db,
+            state.lock_manager,
+            state.cron_cache,
+            state.one_off_cache,
+          )
           |> result.replace_error("Failed to start new instance"),
         )
 

@@ -13,6 +13,9 @@ import joblot/cache/registry
 import joblot/cache/sql
 import pog
 
+pub type Message =
+  registry.Message(Cron)
+
 pub type Cron {
   Cron(
     id: String,

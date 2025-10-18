@@ -1,6 +1,8 @@
 import gleam/erlang/process
 import gleam/otp/actor
 import gleam/otp/static_supervisor as supervisor
+import joblot/cache/cron as cron_cache
+import joblot/cache/one_off_jobs as one_off_cache
 import joblot/instance/builder
 import joblot/instance/cron_instance
 import joblot/instance/one_off_instance
@@ -16,14 +18,30 @@ pub fn start(
   job_id: JobId,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
 ) -> Result(process.Pid, actor.StartError) {
   let lock_id = "instance_lock_" <> job_id.id
 
   let result =
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(lock.supervised(lock_id, lock_manager, db))
-    |> try_add_cron_worker(job_id, db, lock_manager, lock_id)
-    |> try_add_one_off_worker(job_id, db, lock_manager, lock_id)
+    |> try_add_cron_worker(
+      job_id,
+      db,
+      lock_manager,
+      cron_cache,
+      one_off_cache,
+      lock_id,
+    )
+    |> try_add_one_off_worker(
+      job_id,
+      db,
+      lock_manager,
+      cron_cache,
+      one_off_cache,
+      lock_id,
+    )
     |> supervisor.start
 
   case result {
@@ -37,6 +55,8 @@ fn try_add_cron_worker(
   job_id: JobId,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
   lock_id: String,
 ) -> supervisor.Builder {
   case job_id {
@@ -44,7 +64,14 @@ fn try_add_cron_worker(
       builder.new()
       |> builder.next_execution_time(cron_instance.get_next_execution_time)
       |> builder.next_request_data(cron_instance.get_next_request_data)
-      |> builder.supervised(id, lock_id, db, lock_manager)
+      |> builder.supervised(
+        id,
+        lock_id,
+        db,
+        lock_manager,
+        cron_cache,
+        one_off_cache,
+      )
       |> supervisor.add(supervisor, _)
     }
     OneTime(_id) -> supervisor
@@ -56,6 +83,8 @@ fn try_add_one_off_worker(
   job_id: JobId,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
   lock_id: String,
 ) -> supervisor.Builder {
   case job_id {
@@ -65,7 +94,14 @@ fn try_add_one_off_worker(
       |> builder.next_execution_time(one_off_instance.get_next_execution_time)
       |> builder.next_request_data(one_off_instance.get_next_request_data)
       |> builder.post_execution_hook(one_off_instance.post_execution_hook)
-      |> builder.supervised(id, lock_id, db, lock_manager)
+      |> builder.supervised(
+        id,
+        lock_id,
+        db,
+        lock_manager,
+        cron_cache,
+        one_off_cache,
+      )
       |> supervisor.add(supervisor, _)
     }
   }

@@ -54,6 +54,8 @@ pub fn main() {
       registry_name,
       pool_name,
       lock_manager_name,
+      cron_jobs_cache_name,
+      one_off_jobs_cache_name,
     ))
     |> supervisor.add(lock.lock_manager_supervised(lock_manager_name, pool_name))
     |> supervisor.add(reconciler.supervised(

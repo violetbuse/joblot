@@ -5,6 +5,8 @@ import gleam/int
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 import gleam/otp/supervision
+import joblot/cache/cron as cron_cache
+import joblot/cache/one_off_jobs as one_off_cache
 import joblot/executor
 import joblot/instance/attempts
 import joblot/lock
@@ -138,6 +140,8 @@ pub type State {
     self: process.Subject(Message),
     db: process.Name(pog.Message),
     lock_manager: process.Name(lock.LockMgrMessage),
+    cron_job_cache: process.Name(cron_cache.Message),
+    one_off_cache: process.Name(one_off_cache.Message),
     id: String,
     lock_id: String,
     pre_execute_hook: PreExecuteHook,
@@ -158,6 +162,8 @@ fn new_state(
   lock_id: String,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
 ) -> State {
   let assert Some(pre_execute_hook) = builder.pre_execute_hook
   let assert Some(get_next_execution_time) = builder.get_next_execution_time
@@ -168,6 +174,8 @@ fn new_state(
     self: process_subject,
     db: db,
     lock_manager: lock_manager,
+    cron_job_cache: cron_cache,
+    one_off_cache: one_off_cache,
     id: id,
     lock_id: lock_id,
     pre_execute_hook: pre_execute_hook,
@@ -192,6 +200,8 @@ pub fn start(
   lock_id: String,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
 ) {
   actor.new_with_initialiser(1000, initializer(
     _,
@@ -200,6 +210,8 @@ pub fn start(
     lock_id,
     db,
     lock_manager,
+    cron_cache,
+    one_off_cache,
   ))
   |> actor.on_message(handle_message)
   |> actor.start
@@ -211,8 +223,12 @@ pub fn supervised(
   lock_id: String,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
 ) {
-  supervision.worker(fn() { start(builder, id, lock_id, db, lock_manager) })
+  supervision.worker(fn() {
+    start(builder, id, lock_id, db, lock_manager, cron_cache, one_off_cache)
+  })
 }
 
 fn initializer(
@@ -222,8 +238,20 @@ fn initializer(
   lock_id: String,
   db: process.Name(pog.Message),
   lock_manager: process.Name(lock.LockMgrMessage),
+  cron_cache: process.Name(cron_cache.Message),
+  one_off_cache: process.Name(one_off_cache.Message),
 ) {
-  let state = new_state(process_subject, builder, id, lock_id, db, lock_manager)
+  let state =
+    new_state(
+      process_subject,
+      builder,
+      id,
+      lock_id,
+      db,
+      lock_manager,
+      cron_cache,
+      one_off_cache,
+    )
 
   process.send_after(state.self, jitter_heartbeat_ms(state), Heartbeat)
 
