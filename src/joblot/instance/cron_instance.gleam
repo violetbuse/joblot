@@ -1,47 +1,65 @@
 import clockwork
+import gleam/bool
+import gleam/float
+import gleam/list
+import gleam/result
 import gleam/time/duration
 import gleam/time/timestamp
+import joblot/cache
+import joblot/cache/cron as cron_cache
 import joblot/executor
 import joblot/instance/attempts
 import joblot/instance/builder
-import joblot/instance/sql
-import pog
+
+pub fn create_refresh_function(state: builder.State) -> builder.RefreshFunction {
+  fn() { cache.refresh_cache(state.cron_job_cache, state.id) }
+}
 
 pub fn get_next_execution_time(
   state: builder.State,
 ) -> Result(builder.NextExecutionResult, String) {
-  let latest_planned_at = attempts.latest_planned_at(state.db, state.id)
-  let assert Ok(attempts) =
-    attempts.get_attempts_for_planned_at(state.db, state.id, latest_planned_at)
-  let assert Ok(pog.Returned(_, [job_data_row])) =
-    sql.get_cron_job(pog.named_connection(state.db), state.id)
+  use cron_job <- result.try(cache.query_cache(
+    state.cron_job_cache,
+    state.id,
+    10_000,
+  ))
+  let should_retry = {
+    let any_successful = list.any(cron_job.attempts, cron_cache.is_successful)
+    use <- bool.guard(when: any_successful, return: False)
+    use <- bool.guard(
+      when: list.length(cron_job.attempts) >= cron_job.maximum_attempts,
+      return: False,
+    )
+    True
+  }
 
-  let should_retry =
-    attempts.should_retry(attempts, job_data_row.maximum_attempts)
+  let last_planned_at =
+    list.first(cron_job.attempts)
+    |> result.map(fn(a) { a.planned_at })
+    |> result.unwrap(cron_job.created_at)
 
   case should_retry {
-    attempts.CanRetry -> {
-      let next_retry_time =
-        attempts.next_retry_time(
-          attempts,
-          latest_planned_at,
-          state.initial_delay_seconds,
-          state.factor,
-          state.maximum_delay_seconds,
-        )
-      Ok(builder.NextExecutionResult(latest_planned_at, next_retry_time))
+    True -> {
+      attempts.next_retry_time(
+        attempts: list.map(cron_job.attempts, fn(a) { a.attempted_at }),
+        planned: last_planned_at,
+        initial: cron_job.initial_delay_secs,
+        factor: cron_job.retry_factor,
+        maximum: cron_job.maximum_delay_secs,
+      )
+      |> builder.NextExecutionResult(last_planned_at, _)
+      |> Ok
     }
-    _ -> {
-      let assert Ok(cron) = clockwork.from_string(job_data_row.cron)
-      let next_occurrence =
+    False -> {
+      let next_planned =
         clockwork.next_occurrence(
-          cron,
-          timestamp.from_unix_seconds(latest_planned_at),
-          duration.milliseconds(0),
+          cron_job.cron,
+          timestamp.from_unix_seconds(last_planned_at),
+          with_offset: duration.seconds(0),
         )
-      let #(unix_seconds, _) =
-        timestamp.to_unix_seconds_and_nanoseconds(next_occurrence)
-      Ok(builder.NextExecutionResult(unix_seconds, unix_seconds))
+        |> timestamp.to_unix_seconds
+        |> float.round
+      Ok(builder.NextExecutionResult(next_planned, next_planned))
     }
   }
 }
@@ -49,16 +67,19 @@ pub fn get_next_execution_time(
 pub fn get_next_request_data(
   state: builder.State,
 ) -> Result(builder.NextRequestDataResult, String) {
-  let assert Ok(pog.Returned(_, [job_data_row])) =
-    sql.get_cron_job(pog.named_connection(state.db), state.id)
+  use cron_job <- result.try(cache.query_cache(
+    state.cron_job_cache,
+    state.id,
+    10_000,
+  ))
   let request =
     executor.ExecutorRequest(
-      method: job_data_row.method,
-      url: job_data_row.url,
-      headers: job_data_row.headers,
-      body: job_data_row.body,
-      timeout_ms: job_data_row.timeout_ms,
-      non_2xx_is_failure: job_data_row.non_2xx_is_failure,
+      method: cron_job.method,
+      url: cron_job.url,
+      headers: cron_job.headers,
+      body: cron_job.body,
+      timeout_ms: cron_job.timeout_ms,
+      non_2xx_is_failure: cron_job.non_2xx_is_failure,
     )
   Ok(
     builder.NextRequestDataResult(request, fn(planned_at, attempted_at) {
@@ -67,8 +88,8 @@ pub fn get_next_request_data(
         attempted_at: attempted_at,
         job_id: state.id,
         job_type: attempts.CronJob,
-        user_id: job_data_row.user_id,
-        tenant_id: job_data_row.tenant_id,
+        user_id: cron_job.user_id,
+        tenant_id: cron_job.tenant_id,
       )
     }),
   )

@@ -56,6 +56,7 @@ pub fn heartbeat_ms(
 pub type Message(datatype) {
   Register(id: String, subject: process.Subject(builder.Message(datatype)))
   GetData(id: String, reply_with: process.Subject(option.Option(datatype)))
+  Refresh(id: String)
 }
 
 pub type State(datatype) {
@@ -111,6 +112,7 @@ fn handle_message(
   case message {
     Register(id, subject) -> handle_register(id, subject, state)
     GetData(id, subject) -> handle_get_data(id, subject, state)
+    Refresh(id) -> handle_refresh(id, state)
   }
 }
 
@@ -143,24 +145,50 @@ fn handle_get_data(
 ) -> actor.Next(State(datatype), Message(datatype)) {
   let existing = dict.get(state.kv, id)
 
-  let _ =
-    process.spawn(fn() {
-      let cache_instance = case existing {
-        Ok(subject) -> {
-          case
-            process.subject_owner(subject)
-            |> result.map(process.is_alive)
-            |> result.unwrap(False)
-          {
-            True -> subject
-            False -> start_cache_instance(id, state)
-          }
+  process.spawn(fn() {
+    let cache_instance = case existing {
+      Ok(subject) -> {
+        case
+          process.subject_owner(subject)
+          |> result.map(process.is_alive)
+          |> result.unwrap(False)
+        {
+          True -> subject
+          False -> start_cache_instance(id, state)
         }
-        Error(_) -> start_cache_instance(id, state)
       }
+      Error(_) -> start_cache_instance(id, state)
+    }
 
-      process.send(cache_instance, builder.GetData(reply_with))
-    })
+    process.send(cache_instance, builder.GetData(reply_with))
+  })
+
+  actor.continue(state)
+}
+
+fn handle_refresh(
+  id: String,
+  state: State(datatype),
+) -> actor.Next(State(datatype), Message(datatype)) {
+  let existing = dict.get(state.kv, id)
+
+  process.spawn(fn() {
+    let cache_instance = case existing {
+      Ok(subject) -> {
+        case
+          process.subject_owner(subject)
+          |> result.map(process.is_alive)
+          |> result.unwrap(False)
+        {
+          True -> subject
+          False -> start_cache_instance(id, state)
+        }
+      }
+      Error(_) -> start_cache_instance(id, state)
+    }
+
+    process.send(cache_instance, builder.Refresh)
+  })
 
   actor.continue(state)
 }

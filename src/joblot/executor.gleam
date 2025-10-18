@@ -1,4 +1,6 @@
+import gleam/http
 import gleam/io
+import gleam/uri
 
 pub type ExecutorError {
   TimeoutError
@@ -9,9 +11,9 @@ pub type ExecutorError {
 
 pub type ExecutorRequest {
   ExecutorRequest(
-    method: String,
-    url: String,
-    headers: List(String),
+    method: http.Method,
+    url: uri.Uri,
+    headers: List(#(String, String)),
     body: String,
     timeout_ms: Int,
     non_2xx_is_failure: Bool,
@@ -30,6 +32,11 @@ pub type ExecutorResponse {
 pub fn execute_request(
   request: ExecutorRequest,
 ) -> Result(ExecutorResponse, ExecutorError) {
-  io.println("Executing request: " <> request.method <> " " <> request.url)
+  io.println(
+    "Executing request: "
+    <> request.method |> http.method_to_string
+    <> " "
+    <> request.url |> uri.to_string,
+  )
   Error(TimeoutError)
 }

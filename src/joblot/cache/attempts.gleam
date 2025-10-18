@@ -129,3 +129,11 @@ pub fn get_attempts(
   })
   |> Ok
 }
+
+pub fn is_successful(attempt: Attempt) -> Bool {
+  case attempt {
+    SuccessfulRequest(..) -> True
+    FailedRequest(..) -> False
+    RequestError(..) -> False
+  }
+}

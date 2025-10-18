@@ -16,6 +16,13 @@ import pog
 pub type Message =
   registry.Message(Cron)
 
+pub type Attempt =
+  attempts.Attempt
+
+pub fn is_successful(attempt: Attempt) -> Bool {
+  attempts.is_successful(attempt)
+}
+
 pub type Cron {
   Cron(
     id: String,

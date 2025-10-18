@@ -15,21 +15,28 @@ import pog
 
 pub opaque type Builder {
   Builder(
+    create_refresh_function: Option(CreateRefreshFunction),
     pre_execute_hook: Option(PreExecuteHook),
     get_next_execution_time: Option(GetNextExecutionTime),
     get_next_request_data: Option(GetNextRequestData),
     post_execution_hook: Option(PostExecutionHook),
     heartbeat_interval_ms: Int,
-    initial_delay_seconds: Int,
-    factor: Float,
-    maximum_delay_seconds: Int,
   )
 }
 
-pub type PreExecuteHook =
-  fn(State) -> Result(Nil, String)
+pub type RefreshFunction =
+  fn() -> Nil
 
-fn default_pre_execute_hook(_state: State) -> Result(Nil, String) {
+pub type CreateRefreshFunction =
+  fn(State) -> RefreshFunction
+
+pub type PreExecuteHook =
+  fn(State, RefreshFunction) -> Result(Nil, String)
+
+fn default_pre_execute_hook(
+  _state: State,
+  _refresh: fn() -> Nil,
+) -> Result(Nil, String) {
   Ok(Nil)
 }
 
@@ -58,6 +65,7 @@ pub type PostExecutionHook =
     State,
     executor.ExecutorRequest,
     Result(executor.ExecutorResponse, executor.ExecutorError),
+    RefreshFunction,
   ) ->
     Result(Nil, String)
 
@@ -65,21 +73,27 @@ fn default_post_execution_hook(
   _state: State,
   _request: executor.ExecutorRequest,
   _execution_result: Result(executor.ExecutorResponse, executor.ExecutorError),
+  _refresh: fn() -> Nil,
 ) -> Result(Nil, String) {
   Ok(Nil)
 }
 
 pub fn new() -> Builder {
   Builder(
+    create_refresh_function: None,
     pre_execute_hook: Some(default_pre_execute_hook),
     get_next_execution_time: None,
     get_next_request_data: None,
     post_execution_hook: Some(default_post_execution_hook),
     heartbeat_interval_ms: 30_000,
-    initial_delay_seconds: 60,
-    factor: 1.5,
-    maximum_delay_seconds: 86_400,
   )
+}
+
+pub fn create_refresh_function(
+  builder: Builder,
+  create_function: CreateRefreshFunction,
+) {
+  Builder(..builder, create_refresh_function: Some(create_function))
 }
 
 pub fn pre_execute_hook(
@@ -117,24 +131,6 @@ pub fn heartbeat_interval_ms(
   Builder(..builder, heartbeat_interval_ms: heartbeat_interval_ms)
 }
 
-pub fn initial_delay_seconds(
-  builder: Builder,
-  initial_delay_seconds: Int,
-) -> Builder {
-  Builder(..builder, initial_delay_seconds: initial_delay_seconds)
-}
-
-pub fn factor(builder: Builder, factor: Float) -> Builder {
-  Builder(..builder, factor: factor)
-}
-
-pub fn maximum_delay_seconds(
-  builder: Builder,
-  maximum_delay_seconds: Int,
-) -> Builder {
-  Builder(..builder, maximum_delay_seconds: maximum_delay_seconds)
-}
-
 pub type State {
   State(
     self: process.Subject(Message),
@@ -144,14 +140,12 @@ pub type State {
     one_off_cache: process.Name(one_off_cache.Message),
     id: String,
     lock_id: String,
+    create_refresh_function: CreateRefreshFunction,
     pre_execute_hook: PreExecuteHook,
     get_next_execution_time: GetNextExecutionTime,
     get_next_request_data: GetNextRequestData,
     post_execution_hook: PostExecutionHook,
     heartbeat_interval_ms: Int,
-    initial_delay_seconds: Int,
-    factor: Float,
-    maximum_delay_seconds: Int,
   )
 }
 
@@ -165,6 +159,7 @@ fn new_state(
   cron_cache: process.Name(cron_cache.Message),
   one_off_cache: process.Name(one_off_cache.Message),
 ) -> State {
+  let assert Some(create_refresh_function) = builder.create_refresh_function
   let assert Some(pre_execute_hook) = builder.pre_execute_hook
   let assert Some(get_next_execution_time) = builder.get_next_execution_time
   let assert Some(get_next_request_data) = builder.get_next_request_data
@@ -178,14 +173,12 @@ fn new_state(
     one_off_cache: one_off_cache,
     id: id,
     lock_id: lock_id,
+    create_refresh_function: create_refresh_function,
     pre_execute_hook: pre_execute_hook,
     get_next_execution_time: get_next_execution_time,
     get_next_request_data: get_next_request_data,
     post_execution_hook: post_execution_hook,
     heartbeat_interval_ms: builder.heartbeat_interval_ms,
-    initial_delay_seconds: builder.initial_delay_seconds,
-    factor: builder.factor,
-    maximum_delay_seconds: builder.maximum_delay_seconds,
   )
 }
 
@@ -276,7 +269,8 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
 
   use <- bool.guard(when: !has_lock, return: actor.continue(state))
 
-  let assert Ok(_) = state.pre_execute_hook(state)
+  let refresh_function = state.create_refresh_function(state)
+  let assert Ok(_) = state.pre_execute_hook(state, refresh_function)
 
   let assert Ok(next_execution_time) = state.get_next_execution_time(state)
 
@@ -346,12 +340,22 @@ fn handle_execute(
 
   let execution_result = executor.execute_request(request)
 
+  let refresh_function = state.create_refresh_function(state)
+
   let save_data = get_attempt_save_data(for_planned_at, current_time)
 
-  let assert Ok(_) =
-    attempts.save_response(state.db, save_data, request, execution_result)
+  refresh_function()
 
-  let assert Ok(_) = state.post_execution_hook(state, request, execution_result)
+  let assert Ok(_) =
+    attempts.save_attempt(state.db, save_data, request, execution_result)
+
+  let assert Ok(_) =
+    state.post_execution_hook(
+      state,
+      request,
+      execution_result,
+      refresh_function,
+    )
 
   actor.continue(state)
 }

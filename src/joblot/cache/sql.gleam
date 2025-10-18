@@ -295,7 +295,13 @@ pub fn list_errored_attempts(
     ))
   }
 
-  "SELECT * FROM errored_attempts WHERE planned_at = $1 AND (one_off_job_id = $2 OR cron_job_id = $2) ORDER BY attempted_at DESC LIMIT 100;
+  "SELECT *
+FROM errored_attempts
+WHERE
+    planned_at = $1 AND
+    (one_off_job_id = $2 OR cron_job_id = $2)
+ORDER BY attempted_at DESC
+LIMIT 100;
 "
   |> pog.query
   |> pog.parameter(pog.int(arg_1))
@@ -379,7 +385,13 @@ pub fn list_responses(
     ))
   }
 
-  "SELECT * FROM responses WHERE planned_at = $1 AND (one_off_job_id = $2 OR cron_job_id = $2) ORDER BY attempted_at DESC LIMIT 100;
+  "SELECT *
+FROM responses
+WHERE
+    planned_at = $1 AND
+    (one_off_job_id = $2 OR cron_job_id = $2)
+ORDER BY attempted_at DESC
+LIMIT 100;
 "
   |> pog.query
   |> pog.parameter(pog.int(arg_1))

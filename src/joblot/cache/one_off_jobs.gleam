@@ -15,6 +15,13 @@ import pog
 pub type Message =
   registry.Message(Job)
 
+pub type Attempt =
+  attempts.Attempt
+
+pub fn is_successful(attempt: Attempt) -> Bool {
+  attempts.is_successful(attempt)
+}
+
 pub type Job {
   Job(
     id: String,
