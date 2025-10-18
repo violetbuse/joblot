@@ -1,15 +1,110 @@
+import clockwork
+import gleam/bool
 import gleam/erlang/process
+import gleam/http
+import gleam/list
 import gleam/otp/supervision
+import gleam/result
+import gleam/string
+import gleam/uri
+import joblot/cache/attempts
 import joblot/cache/builder
 import joblot/cache/registry
+import joblot/cache/sql
 import pog
 
 pub type Cron {
-  Cron
+  Cron(
+    id: String,
+    created_at: Int,
+    user_id: String,
+    tenant_id: String,
+    metadata: String,
+    cron: clockwork.Cron,
+    method: http.Method,
+    url: uri.Uri,
+    headers: List(#(String, String)),
+    body: String,
+    maximum_attempts: Int,
+    initial_delay_secs: Int,
+    retry_factor: Float,
+    maximum_delay_secs: Int,
+    non_2xx_is_failure: Bool,
+    timeout_ms: Int,
+    attempts: List(attempts.Attempt),
+  )
 }
 
 fn get_data(id: String, ctx: builder.Context) -> Result(Cron, String) {
-  todo
+  let connection = pog.named_connection(ctx.db)
+  use pog.Returned(count, rows) <- result.try(
+    sql.get_cron_job(connection, id)
+    |> result.replace_error("Could not fetch cron job from db. id: " <> id),
+  )
+
+  use <- bool.guard(
+    when: count != 1,
+    return: Error("Cron job does not exist, id: " <> id),
+  )
+
+  let assert [row] = rows
+  let assert Ok(pog.Returned(_, [sql.CronLatestPlannedRow(latest_planned_at)])) =
+    sql.cron_latest_planned(connection, id)
+
+  use attempts <- result.try(attempts.get_attempts(
+    ctx.db,
+    latest_planned_at,
+    id,
+    20_000,
+  ))
+
+  use cron <- result.try(
+    clockwork.from_string(row.cron)
+    |> result.replace_error(
+      "Invalid cron expression: " <> row.cron <> " job_id: " <> id,
+    ),
+  )
+
+  use method <- result.try(
+    http.parse_method(row.method)
+    |> result.replace_error(
+      "Invalid http method: " <> row.method <> " job_id: " <> id,
+    ),
+  )
+
+  use url <- result.try(
+    uri.parse(row.url)
+    |> result.replace_error("Invalid url: " <> row.url <> " job_id: " <> id),
+  )
+
+  let headers =
+    row.headers
+    |> list.map(string.split_once(_, ":"))
+    |> result.all
+
+  use headers <- result.try(
+    headers |> result.replace_error("Invalid headers, job_id: " <> id),
+  )
+
+  Ok(Cron(
+    id: row.id,
+    created_at: row.created_at,
+    user_id: row.user_id,
+    tenant_id: row.tenant_id,
+    metadata: row.metadata,
+    cron: cron,
+    method: method,
+    url: url,
+    headers: headers,
+    body: row.body,
+    maximum_attempts: row.maximum_attempts,
+    initial_delay_secs: row.initial_retry_delay_seconds,
+    retry_factor: row.retry_delay_factor,
+    maximum_delay_secs: row.maximum_retry_delay_seconds,
+    non_2xx_is_failure: row.non_2xx_is_failure,
+    timeout_ms: row.timeout_ms,
+    attempts: attempts,
+  ))
 }
 
 pub fn start_cache(

@@ -32,6 +32,9 @@ pub type CreateOneOffJobRow {
     non_2xx_is_failure: Bool,
     completed: Bool,
     timeout_ms: Int,
+    initial_retry_delay_seconds: Int,
+    retry_delay_factor: Float,
+    maximum_retry_delay_seconds: Int,
   )
 }
 
@@ -73,6 +76,9 @@ pub fn create_one_off_job(
     use non_2xx_is_failure <- decode.field(12, decode.bool)
     use completed <- decode.field(13, decode.bool)
     use timeout_ms <- decode.field(14, decode.int)
+    use initial_retry_delay_seconds <- decode.field(15, decode.int)
+    use retry_delay_factor <- decode.field(16, decode.float)
+    use maximum_retry_delay_seconds <- decode.field(17, decode.int)
     decode.success(CreateOneOffJobRow(
       id:,
       hash:,
@@ -89,6 +95,9 @@ pub fn create_one_off_job(
       non_2xx_is_failure:,
       completed:,
       timeout_ms:,
+      initial_retry_delay_seconds:,
+      retry_delay_factor:,
+      maximum_retry_delay_seconds:,
     ))
   }
 
@@ -261,6 +270,9 @@ pub type GetOneOffJobRow {
     non_2xx_is_failure: Bool,
     completed: Bool,
     timeout_ms: Int,
+    initial_retry_delay_seconds: Int,
+    retry_delay_factor: Float,
+    maximum_retry_delay_seconds: Int,
   )
 }
 
@@ -292,6 +304,9 @@ pub fn get_one_off_job(
     use non_2xx_is_failure <- decode.field(12, decode.bool)
     use completed <- decode.field(13, decode.bool)
     use timeout_ms <- decode.field(14, decode.int)
+    use initial_retry_delay_seconds <- decode.field(15, decode.int)
+    use retry_delay_factor <- decode.field(16, decode.float)
+    use maximum_retry_delay_seconds <- decode.field(17, decode.int)
     decode.success(GetOneOffJobRow(
       id:,
       hash:,
@@ -308,6 +323,9 @@ pub fn get_one_off_job(
       non_2xx_is_failure:,
       completed:,
       timeout_ms:,
+      initial_retry_delay_seconds:,
+      retry_delay_factor:,
+      maximum_retry_delay_seconds:,
     ))
   }
 
@@ -430,6 +448,9 @@ pub type ListOneOffJobsRow {
     non_2xx_is_failure: Bool,
     completed: Bool,
     timeout_ms: Int,
+    initial_retry_delay_seconds: Int,
+    retry_delay_factor: Float,
+    maximum_retry_delay_seconds: Int,
   )
 }
 
@@ -462,6 +483,9 @@ pub fn list_one_off_jobs(
     use non_2xx_is_failure <- decode.field(12, decode.bool)
     use completed <- decode.field(13, decode.bool)
     use timeout_ms <- decode.field(14, decode.int)
+    use initial_retry_delay_seconds <- decode.field(15, decode.int)
+    use retry_delay_factor <- decode.field(16, decode.float)
+    use maximum_retry_delay_seconds <- decode.field(17, decode.int)
     decode.success(ListOneOffJobsRow(
       id:,
       hash:,
@@ -478,6 +502,9 @@ pub fn list_one_off_jobs(
       non_2xx_is_failure:,
       completed:,
       timeout_ms:,
+      initial_retry_delay_seconds:,
+      retry_delay_factor:,
+      maximum_retry_delay_seconds:,
     ))
   }
 

@@ -27,6 +27,9 @@ CREATE TABLE one_off_jobs (
     -- http execution details
     execute_at INTEGER NOT NULL,
     maximum_attempts INTEGER NOT NULL DEFAULT 1,
+    initial_retry_delay_seconds INTEGER NOT NULL DEFAULT 30,
+    retry_delay_factor REAL NOT NULL DEFAULT 1.5,
+    maximum_retry_delay_seconds INTEGER NOT NULL DEFAULT 86400,
     non_2xx_is_failure BOOLEAN NOT NULL DEFAULT TRUE,
     timeout_ms INTEGER NOT NULL DEFAULT 10000,
     completed BOOLEAN NOT NULL DEFAULT FALSE
@@ -57,6 +60,9 @@ CREATE TABLE cron_jobs (
     headers TEXT [] NOT NULL,
     body TEXT NOT NULL,
     maximum_attempts INTEGER NOT NULL DEFAULT 1,
+    initial_retry_delay_seconds INTEGER NOT NULL DEFAULT 30,
+    retry_delay_factor REAL NOT NULL DEFAULT 1.5,
+    maximum_retry_delay_seconds INTEGER NOT NULL DEFAULT 86400,
     non_2xx_is_failure BOOLEAN NOT NULL DEFAULT TRUE,
     timeout_ms INTEGER NOT NULL DEFAULT 10000
 );
