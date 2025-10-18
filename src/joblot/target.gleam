@@ -5,10 +5,10 @@ import gleam/result
 import gleam/set
 import joblot/instance.{type JobId}
 
-pub fn start_target(name: process.Name(Message)) {
+pub fn start_target(name: process.Name(Message), local_shard_id: Int) {
   actor.new_with_initialiser(5000, fn(subject) {
     let initialization = {
-      Ok(State(subject, set.new()))
+      Ok(State(self: subject, local_shard_id:, job_ids: set.new()))
     }
 
     use state <- result.try(initialization)
@@ -22,8 +22,8 @@ pub fn start_target(name: process.Name(Message)) {
   |> actor.start
 }
 
-pub fn supervised(name: process.Name(Message)) {
-  supervision.worker(fn() { start_target(name) })
+pub fn supervised(name: process.Name(Message), shard_id local_shard_id: Int) {
+  supervision.worker(fn() { start_target(name, local_shard_id) })
 }
 
 pub opaque type Message {
@@ -33,7 +33,11 @@ pub opaque type Message {
 }
 
 type State {
-  State(self: process.Subject(Message), job_ids: set.Set(JobId))
+  State(
+    self: process.Subject(Message),
+    local_shard_id: Int,
+    job_ids: set.Set(JobId),
+  )
 }
 
 fn handle_message(state: State, message: Message) -> actor.Next(State, Message) {

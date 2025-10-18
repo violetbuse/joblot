@@ -62,6 +62,7 @@ fn try_add_cron_worker(
   case job_id {
     Cron(id) -> {
       builder.new()
+      |> builder.create_refresh_function(cron_instance.create_refresh_function)
       |> builder.next_execution_time(cron_instance.get_next_execution_time)
       |> builder.next_request_data(cron_instance.get_next_request_data)
       |> builder.supervised(
@@ -91,6 +92,9 @@ fn try_add_one_off_worker(
     Cron(_id) -> supervisor
     OneTime(id) -> {
       builder.new()
+      |> builder.create_refresh_function(
+        one_off_instance.create_refresh_function,
+      )
       |> builder.next_execution_time(one_off_instance.get_next_execution_time)
       |> builder.next_request_data(one_off_instance.get_next_request_data)
       |> builder.post_execution_hook(one_off_instance.post_execution_hook)

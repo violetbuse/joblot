@@ -6,17 +6,27 @@ import gleam/http/response
 import joblot/api/cron_jobs/handlers as cron_jobs
 import joblot/api/error
 import joblot/api/one_off_jobs/handlers as one_off_jobs
+import joblot/cache/cron as cron_cache
+import joblot/cache/one_off_jobs as one_off_cache
 import mist.{type Connection, type ResponseData}
 import pog
 import wisp.{type Request, type Response}
 import wisp/wisp_mist
 
 type Context {
-  Context(db: process.Name(pog.Message))
+  Context(
+    db: process.Name(pog.Message),
+    cron_caches: List(process.Name(cron_cache.Message)),
+    one_off_caches: List(process.Name(one_off_cache.Message)),
+  )
 }
 
-pub fn supervised(db: process.Name(pog.Message)) {
-  let context = Context(db)
+pub fn supervised(
+  db: process.Name(pog.Message),
+  cron_caches: List(process.Name(cron_cache.Message)),
+  one_off_caches: List(process.Name(one_off_cache.Message)),
+) {
+  let context = Context(db:, cron_caches:, one_off_caches:)
   let secret = env.get_string_or("SECRET", "shhhh! super secret value!!!!!")
 
   let wisp_handler = wisp_mist.handler(handle_request(_, context), secret)
