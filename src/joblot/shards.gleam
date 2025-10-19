@@ -6,6 +6,7 @@ import joblot/api
 import joblot/cache/cron as cron_cache
 import joblot/cache/one_off_jobs as one_off_cache
 import joblot/lock
+import joblot/pubsub
 import joblot/reconciler
 import joblot/registry
 import joblot/scanner
@@ -17,6 +18,9 @@ pub type ProgramConfig {
     db_name: process.Name(pog.Message),
     db_url: String,
     db_pool_size: Int,
+    pubsub_name: process.Name(pubsub.Message),
+    pubsub_port: Int,
+    api_port: Int,
     shards: List(ShardConfig),
   )
 }
@@ -44,10 +48,19 @@ pub fn create_config(shard_count: Int) -> ProgramConfig {
 
   let db_name = process.new_name("db_pool")
 
+  let pubsub_name = process.new_name("pubsub")
+
+  let pubsub_port = env.get_int_or("PUBSUB_PORT", 9090)
+
+  let api_port = env.get_int_or("API_PORT", 8080)
+
   ProgramConfig(
     db_name:,
     db_pool_size:,
     db_url:,
+    pubsub_name:,
+    pubsub_port:,
+    api_port:,
     shards: list.range(from: 1, to: shard_count)
       |> list.map(fn(local_shard_id) {
         ShardConfig(
@@ -119,9 +132,12 @@ pub fn start_program(config: ProgramConfig) {
     |> supervisor.add(db_pool_supervised)
     |> supervisor.add(api.supervised(
       config.db_name,
+      config.pubsub_name,
       cron_caches,
       one_off_caches,
+      config.api_port,
     ))
+    |> supervisor.add(pubsub.supervised(config.pubsub_name, config.pubsub_port))
     |> multiple_shards(config.shards)
     |> supervisor.start
 }
