@@ -5,6 +5,8 @@ import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
 import joblot/cache/builder
+import joblot/pubsub
+import joblot/pubsub/types
 import pog
 
 pub type Builder(datatype) {
@@ -64,6 +66,7 @@ pub type State(datatype) {
     kv: dict.Dict(String, process.Subject(builder.Message(datatype))),
     name: process.Name(Message(datatype)),
     db: process.Name(pog.Message),
+    pubsub: process.Name(pubsub.Message),
     pubsub_category: String,
     get_data: builder.GetDataHook(datatype),
     instance_heartbeat_ms: Int,
@@ -81,7 +84,11 @@ fn heartbeat_hook(
   }
 }
 
-pub fn start(builder: Builder(datatype), db: process.Name(pog.Message)) {
+pub fn start(
+  builder: Builder(datatype),
+  db: process.Name(pog.Message),
+  pubsub: process.Name(pubsub.Message),
+) {
   let assert option.Some(name) = builder.name
   let assert option.Some(pubsub_category) = builder.pubsub_category
   let assert option.Some(get_data) = builder.get_data
@@ -94,6 +101,7 @@ pub fn start(builder: Builder(datatype), db: process.Name(pog.Message)) {
     get_data:,
     instance_heartbeat_ms:,
     db:,
+    pubsub:,
   )
   |> actor.new()
   |> actor.on_message(handle_message)
@@ -101,8 +109,12 @@ pub fn start(builder: Builder(datatype), db: process.Name(pog.Message)) {
   |> actor.start
 }
 
-pub fn supervised(builder: Builder(datatype), db: process.Name(pog.Message)) {
-  supervision.worker(fn() { start(builder, db) })
+pub fn supervised(
+  builder: Builder(datatype),
+  db: process.Name(pog.Message),
+  pubsub: process.Name(pubsub.Message),
+) {
+  supervision.worker(fn() { start(builder, db, pubsub) })
 }
 
 fn handle_message(
@@ -188,6 +200,12 @@ fn handle_refresh(
     }
 
     process.send(cache_instance, builder.Refresh)
+
+    let pubsub_manager_subject = process.named_subject(state.pubsub)
+    let channel_id = state.pubsub_category <> ":" <> id
+    let channel =
+      process.call(pubsub_manager_subject, 1000, types.GetChannel(channel_id, _))
+    process.send(channel, types.Publish(id))
   })
 
   actor.continue(state)
@@ -203,7 +221,7 @@ fn start_cache_instance(
     |> builder.get_data(state.get_data)
     |> builder.heartbeat_hook(heartbeat_hook(state.name))
     |> builder.heartbeat_ms(state.instance_heartbeat_ms)
-    |> builder.start(id, state.db)
+    |> builder.start(id, state.db, state.pubsub)
 
   subject
 }

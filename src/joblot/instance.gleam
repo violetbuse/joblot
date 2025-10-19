@@ -65,6 +65,7 @@ fn try_add_cron_worker(
       |> builder.create_refresh_function(cron_instance.create_refresh_function)
       |> builder.next_execution_time(cron_instance.get_next_execution_time)
       |> builder.next_request_data(cron_instance.get_next_request_data)
+      |> builder.heartbeat_interval_ms(5000)
       |> builder.supervised(
         id,
         lock_id,
@@ -98,6 +99,7 @@ fn try_add_one_off_worker(
       |> builder.next_execution_time(one_off_instance.get_next_execution_time)
       |> builder.next_request_data(one_off_instance.get_next_request_data)
       |> builder.post_execution_hook(one_off_instance.post_execution_hook)
+      |> builder.heartbeat_interval_ms(5000)
       |> builder.supervised(
         id,
         lock_id,

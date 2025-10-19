@@ -4,6 +4,8 @@ import gleam/int
 import gleam/option
 import gleam/otp/actor
 import gleam/otp/supervision
+import joblot/pubsub
+import joblot/pubsub/types
 import pog
 
 pub opaque type Builder(datatype) {
@@ -16,7 +18,11 @@ pub opaque type Builder(datatype) {
 }
 
 pub type Context {
-  Context(db: process.Name(pog.Message))
+  Context(
+    db: process.Name(pog.Message),
+    pubsub: process.Name(pubsub.Message),
+    pubsub_category: String,
+  )
 }
 
 pub type GetDataHook(datatype) =
@@ -65,6 +71,7 @@ pub fn heartbeat_ms(
 pub type State(datatype) {
   State(
     self: process.Subject(Message(datatype)),
+    notif_recv: process.Subject(String),
     heartbeat_ms: Int,
     get_data: GetDataHook(datatype),
     heartbeat_hook: HeartbeatHook(datatype),
@@ -79,18 +86,22 @@ fn new_state(
   builder: Builder(datatype),
   id: String,
   db: process.Name(pog.Message),
+  pubsub: process.Name(pubsub.Message),
 ) -> State(datatype) {
-  let assert option.Some(_pubsub_category) = builder.pubsub_category
+  let assert option.Some(pubsub_category) = builder.pubsub_category
   let assert option.Some(get_data_hook) = builder.get_data
   let assert option.Some(heartbeat_hook) = builder.heartbeat_hook
 
-  let context = Context(db)
+  let context = Context(db, pubsub, pubsub_category)
 
   let assert Ok(data) = get_data_hook(id, context)
+
+  let pubsub_subject = process.new_subject()
 
   let state =
     State(
       self: process_subject,
+      notif_recv: pubsub_subject,
       heartbeat_ms: builder.heartbeat_ms,
       get_data: get_data_hook,
       heartbeat_hook: heartbeat_hook,
@@ -108,8 +119,9 @@ pub fn start(
   builder: Builder(datatype),
   id: String,
   db: process.Name(pog.Message),
+  pubsub: process.Name(pubsub.Message),
 ) {
-  actor.new_with_initialiser(5000, initializer(_, builder, id, db))
+  actor.new_with_initialiser(5000, initializer(_, builder, id, db, pubsub))
   |> actor.on_message(handle_message)
   |> actor.start
 }
@@ -118,8 +130,9 @@ pub fn supervised(
   builder: Builder(datatype),
   id: String,
   db: process.Name(pog.Message),
+  pubsub: process.Name(pubsub.Message),
 ) {
-  supervision.worker(fn() { start(builder, id, db) })
+  supervision.worker(fn() { start(builder, id, db, pubsub) })
 }
 
 fn initializer(
@@ -127,14 +140,25 @@ fn initializer(
   builder: Builder(datatype),
   id: String,
   db: process.Name(pog.Message),
+  pubsub: process.Name(pubsub.Message),
 ) {
-  let state = new_state(process_subject, builder, id, db)
+  let state = new_state(process_subject, builder, id, db, pubsub)
 
   process.send_after(state.self, jitter_heartbeat_ms(state), Heartbeat)
+
+  let selector =
+    create_selector(
+      process_subject,
+      state.notif_recv,
+      state.context.pubsub_category,
+      state.id,
+      state.context.pubsub,
+    )
 
   state
   |> actor.initialised
   |> actor.returning(process_subject)
+  |> actor.selecting(selector)
   |> Ok
 }
 
@@ -179,7 +203,17 @@ fn handle_heartbeat(
 
   let assert Ok(_) = state.heartbeat_hook(state)
 
+  let selector =
+    create_selector(
+      state.self,
+      state.notif_recv,
+      state.context.pubsub_category,
+      state.id,
+      state.context.pubsub,
+    )
+
   actor.continue(state)
+  |> actor.with_selector(selector)
 }
 
 fn handle_refresh(
@@ -193,4 +227,24 @@ fn handle_refresh(
     }
     Error(_) -> actor.stop()
   }
+}
+
+fn create_selector(
+  self: process.Subject(Message(datatype)),
+  pubsub_subject: process.Subject(String),
+  channel_category: String,
+  id: String,
+  pubsub: process.Name(pubsub.Message),
+) -> process.Selector(Message(datatype)) {
+  let channel_id = channel_category <> ":" <> id
+
+  let channel =
+    process.named_subject(pubsub)
+    |> process.call(1000, types.GetChannel(channel_id, _))
+
+  process.send(channel, types.Subscribe(pubsub_subject))
+
+  process.new_selector()
+  |> process.select(self)
+  |> process.select_map(pubsub_subject, fn(_) { Refresh })
 }

@@ -29,6 +29,7 @@ pub type ShardConfig {
   ShardConfig(
     shard_id: Int,
     db_name: process.Name(pog.Message),
+    pubsub_name: process.Name(pubsub.Message),
     cron_cache: process.Name(cron_cache.Message),
     one_off_cache: process.Name(one_off_cache.Message),
     target: process.Name(target.Message),
@@ -66,6 +67,7 @@ pub fn create_config(shard_count: Int) -> ProgramConfig {
         ShardConfig(
           shard_id: local_shard_id,
           db_name:,
+          pubsub_name:,
           cron_cache: process.new_name("cron_cache"),
           one_off_cache: process.new_name("one_off_cache"),
           target: process.new_name("target"),
@@ -78,10 +80,15 @@ pub fn create_config(shard_count: Int) -> ProgramConfig {
 
 fn create_shard_supervisor(config: ShardConfig) {
   supervisor.new(supervisor.OneForOne)
-  |> supervisor.add(cron_cache.supervised(config.cron_cache, config.db_name))
+  |> supervisor.add(cron_cache.supervised(
+    config.cron_cache,
+    config.db_name,
+    config.pubsub_name,
+  ))
   |> supervisor.add(one_off_cache.supervised(
     config.one_off_cache,
     config.db_name,
+    config.pubsub_name,
   ))
   |> supervisor.add(target.supervised(config.target, config.shard_id))
   |> supervisor.add(lock.lock_manager_supervised(config.locks, config.db_name))
