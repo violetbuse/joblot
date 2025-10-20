@@ -2,7 +2,7 @@ import gleam/erlang/process
 import gleam/otp/actor
 import joblot/pubsub/types
 
-pub type State {
+type State {
   State(manager: process.Subject(types.ManagerMessage))
 }
 

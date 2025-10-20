@@ -21,7 +21,7 @@ pub type State {
       reference.Reference,
       process.Subject(types.ServerMessage),
     ),
-    clients: set.Set(process.Subject(types.ClientMessage)),
+    clients: dict.Dict(String, process.Subject(types.ClientMessage)),
   )
 }
 
@@ -39,7 +39,7 @@ fn initialize(
 ) -> Result(actor.Initialised(State, Message, Nil), String) {
   process.send(self, types.MgrHeartbeat)
 
-  State(self:, channels: dict.new(), servers: dict.new(), clients: set.new())
+  State(self:, channels: dict.new(), servers: dict.new(), clients: dict.new())
   |> actor.initialised
   |> Ok
 }
@@ -51,6 +51,10 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
       handle_get_channel(name, reply_with, state)
     types.InitServer(ref, subject) -> handle_init_server(ref, subject, state)
     types.CloseServer(ref) -> handle_close_server(ref, state)
+    types.ClientAddresses(reply_with) ->
+      handle_client_addresses(reply_with, state)
+    types.InitClient(addr, subject) -> handle_init_client(addr, subject, state)
+    types.CloseClient(addr) -> handle_close_client(addr, state)
   }
 }
 
@@ -64,7 +68,10 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
       dict.values(state.servers)
       |> list.map(types.ServerConnection)
       |> set.from_list
-    let client_connections = set.map(state.clients, types.ClientConnection)
+    let client_connections =
+      dict.values(state.clients)
+      |> list.map(types.ClientConnection)
+      |> set.from_list
 
     let connections = set.union(server_connections, client_connections)
 
@@ -125,4 +132,30 @@ fn handle_close_server(
   state: State,
 ) -> actor.Next(State, Message) {
   actor.continue(State(..state, servers: dict.delete(state.servers, ref)))
+}
+
+fn handle_client_addresses(
+  reply_with: process.Subject(set.Set(String)),
+  state: State,
+) -> actor.Next(State, Message) {
+  dict.keys(state.clients) |> set.from_list |> process.send(reply_with, _)
+
+  actor.continue(state)
+}
+
+fn handle_init_client(
+  address: String,
+  subject: process.Subject(types.ClientMessage),
+  state: State,
+) -> actor.Next(State, Message) {
+  State(..state, clients: dict.insert(state.clients, address, subject))
+  |> actor.continue
+}
+
+fn handle_close_client(
+  address: String,
+  state: State,
+) -> actor.Next(State, Message) {
+  State(..state, clients: dict.delete(state.clients, address))
+  |> actor.continue
 }

@@ -12,6 +12,9 @@ pub type ManagerMessage {
   )
   InitServer(ref: reference.Reference, subject: process.Subject(ServerMessage))
   CloseServer(ref: reference.Reference)
+  ClientAddresses(reply_with: process.Subject(set.Set(String)))
+  InitClient(address: String, subject: process.Subject(ClientMessage))
+  CloseClient(address: String)
 }
 
 pub type ChannelMessage {
@@ -35,6 +38,7 @@ pub type ClientMessage {
     channels: dict.Dict(String, process.Subject(ChannelMessage)),
     connections: set.Set(Connection),
   )
+  CltRefresh
   CltOutgoingMessage(channel_id: String, message: String, count_to_limit: Int)
 }
 

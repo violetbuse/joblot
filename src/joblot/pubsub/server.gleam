@@ -21,7 +21,7 @@ pub fn supervised(manager: process.Name(types.ManagerMessage), port: Int) {
 }
 
 fn on_init(
-  conn: glisten.Connection(types.ServerMessage),
+  _conn: glisten.Connection(types.ServerMessage),
   manager: process.Name(types.ManagerMessage),
 ) -> #(State, option.Option(process.Selector(types.ServerMessage))) {
   let self = process.new_subject()
