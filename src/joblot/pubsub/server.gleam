@@ -7,6 +7,7 @@ import joblot/pubsub/types
 pub type State {
   State(
     manager: process.Subject(types.ManagerMessage),
+    self: process.Subject(types.ServerMessage),
     ref: reference.Reference,
   )
 }
@@ -23,7 +24,17 @@ fn on_init(
   conn: glisten.Connection(types.ServerMessage),
   manager: process.Name(types.ManagerMessage),
 ) -> #(State, option.Option(process.Selector(types.ServerMessage))) {
-  todo
+  let self = process.new_subject()
+  let selector = process.new_selector() |> process.select(self)
+
+  process.send(self, types.SrvRefresh)
+
+  let state =
+    State(manager: process.named_subject(manager), self:, ref: reference.new())
+
+  process.send(state.manager, types.InitServer(state.ref, state.self))
+
+  #(state, option.Some(selector))
 }
 
 fn loop(
@@ -35,5 +46,5 @@ fn loop(
 }
 
 fn on_close(state: State) -> Nil {
-  todo
+  process.send(state.manager, types.CloseServer(state.ref))
 }
