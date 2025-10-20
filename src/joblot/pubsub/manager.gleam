@@ -1,3 +1,4 @@
+import gleam/bool
 import gleam/dict
 import gleam/erlang/process
 import gleam/erlang/reference
@@ -6,7 +7,10 @@ import gleam/list
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/set
+import joblot/pubsub/channel
+import joblot/pubsub/client
 import joblot/pubsub/types
+import joblot/servers
 
 pub type Message =
   types.ManagerMessage
@@ -16,6 +20,8 @@ const heartbeat_interval_ms = 10_000
 pub type State {
   State(
     self: process.Subject(Message),
+    self_name: process.Name(Message),
+    server_registry: process.Name(servers.Message),
     channels: dict.Dict(String, process.Subject(types.ChannelMessage)),
     servers: dict.Dict(
       reference.Reference,
@@ -25,9 +31,12 @@ pub type State {
   )
 }
 
-pub fn supervised(name: process.Name(Message)) {
+pub fn supervised(
+  name: process.Name(Message),
+  server_registry: process.Name(servers.Message),
+) {
   supervision.worker(fn() {
-    actor.new_with_initialiser(1000, initialize)
+    actor.new_with_initialiser(1000, initialize(_, name, server_registry))
     |> actor.on_message(handle_message)
     |> actor.named(name)
     |> actor.start
@@ -36,10 +45,19 @@ pub fn supervised(name: process.Name(Message)) {
 
 fn initialize(
   self: process.Subject(Message),
+  self_name: process.Name(Message),
+  server_registry: process.Name(servers.Message),
 ) -> Result(actor.Initialised(State, Message, Nil), String) {
   process.send(self, types.MgrHeartbeat)
 
-  State(self:, channels: dict.new(), servers: dict.new(), clients: dict.new())
+  State(
+    self:,
+    self_name:,
+    server_registry: server_registry,
+    channels: dict.new(),
+    servers: dict.new(),
+    clients: dict.new(),
+  )
   |> actor.initialised
   |> Ok
 }
@@ -106,7 +124,78 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
     })
   })
 
-  actor.continue(state)
+  state
+  |> verify_channels
+  |> verify_servers
+  |> verify_clients
+  |> actor.continue
+}
+
+fn verify_channels(state: State) -> State {
+  State(
+    ..state,
+    channels: dict.map_values(state.channels, fn(id, subject) {
+      let assert Ok(pid) = process.subject_owner(subject)
+      let is_alive = process.is_alive(pid)
+
+      case is_alive {
+        True -> subject
+        False -> {
+          let assert Ok(start_result) = channel.start(state.self_name, id)
+          start_result.data
+        }
+      }
+    }),
+  )
+}
+
+fn verify_servers(state: State) -> State {
+  State(
+    ..state,
+    servers: dict.filter(state.servers, fn(_, subject) {
+      let assert Ok(pid) = process.subject_owner(subject)
+
+      process.is_alive(pid)
+    }),
+  )
+}
+
+fn verify_clients(state: State) -> State {
+  let clients =
+    state.clients
+    |> dict.filter(fn(_, subject) {
+      let assert Ok(pid) = process.subject_owner(subject)
+      process.is_alive(pid)
+    })
+
+  let client_addresses = dict.keys(clients) |> set.from_list
+  let addresses = servers.get_others(state.server_registry)
+
+  let clients_to_create = set.difference(addresses, client_addresses)
+
+  let clients_without_killed =
+    clients
+    |> dict.filter(fn(addr, subject) {
+      let should_kill = set.contains(addresses, addr) |> bool.negate
+
+      case should_kill {
+        False -> True
+        True -> {
+          process.send(subject, types.Close)
+
+          False
+        }
+      }
+    })
+
+  let new_clients =
+    set.to_list(clients_to_create)
+    |> list.fold(clients_without_killed, fn(dict, address) {
+      let assert Ok(start_result) = client.start(address, state.self_name)
+      dict.insert(dict, address, start_result.data)
+    })
+
+  State(..state, clients: new_clients)
 }
 
 fn handle_get_channel(

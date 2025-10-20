@@ -34,6 +34,7 @@ pub type ServerMessage {
 }
 
 pub type ClientMessage {
+  Close
   CltHeartbeat(
     channels: dict.Dict(String, process.Subject(ChannelMessage)),
     connections: set.Set(Connection),

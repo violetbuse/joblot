@@ -20,7 +20,10 @@ pub fn start(address: String, manager_name: process.Name(types.ManagerMessage)) 
 fn initialize(
   self: process.Subject(Message),
   manager: process.Subject(types.ManagerMessage),
-) -> Result(actor.Initialised(State, types.ClientMessage, Nil), String) {
+) -> Result(
+  actor.Initialised(State, types.ClientMessage, process.Subject(Message)),
+  String,
+) {
   todo
 }
 

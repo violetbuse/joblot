@@ -3,13 +3,13 @@ import gleam/otp/actor
 import joblot/pubsub/types
 
 type State {
-  State(manager: process.Subject(types.ManagerMessage))
+  State(manager: process.Subject(types.ManagerMessage), id: String)
 }
 
-pub fn start(manager_name: process.Name(types.ManagerMessage)) {
+pub fn start(manager_name: process.Name(types.ManagerMessage), id: String) {
   let manager = process.named_subject(manager_name)
 
-  actor.new_with_initialiser(500, initialize(_, manager))
+  actor.new_with_initialiser(500, initialize(_, manager, id))
   |> actor.on_message(handle_message)
   |> actor.start
 }
@@ -17,7 +17,15 @@ pub fn start(manager_name: process.Name(types.ManagerMessage)) {
 fn initialize(
   self: process.Subject(types.ChannelMessage),
   manager: process.Subject(types.ManagerMessage),
-) -> Result(actor.Initialised(State, types.ChannelMessage, Nil), String) {
+  id: String,
+) -> Result(
+  actor.Initialised(
+    State,
+    types.ChannelMessage,
+    process.Subject(types.ChannelMessage),
+  ),
+  String,
+) {
   todo
 }
 

@@ -126,3 +126,9 @@ CREATE INDEX idx_errored_attempts_planned_at ON errored_attempts(planned_at);
 CREATE INDEX idx_errored_attempts_attempted_at ON errored_attempts(attempted_at);
 CREATE INDEX idx_errored_attempts_one_off_job_id ON errored_attempts(one_off_job_id);
 CREATE INDEX idx_errored_attempts_cron_job_id ON errored_attempts(cron_job_id);
+--servers table for server discovery for pubsub etc
+CREATE TABLE servers (
+    address TEXT NOT NULL,
+    last_online INTEGER NOT NULL,
+    PRIMARY KEY (address)
+);

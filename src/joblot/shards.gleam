@@ -10,11 +10,14 @@ import joblot/pubsub
 import joblot/reconciler
 import joblot/registry
 import joblot/scanner
+import joblot/servers
 import joblot/target
 import pog
 
 pub type ProgramConfig {
   ProgramConfig(
+    address: String,
+    servers_name: process.Name(servers.Message),
     db_name: process.Name(pog.Message),
     db_url: String,
     db_pool_size: Int,
@@ -39,6 +42,10 @@ pub type ShardConfig {
 }
 
 pub fn create_config(shard_count: Int) -> ProgramConfig {
+  let address = env.get_string_or("HOSTNAME", "127.0.0.1:9090")
+
+  let servers_name = process.new_name("servers_watcher")
+
   let db_url =
     env.get_string_or(
       "DATABASE_URL",
@@ -56,6 +63,8 @@ pub fn create_config(shard_count: Int) -> ProgramConfig {
   let api_port = env.get_int_or("API_PORT", 8080)
 
   ProgramConfig(
+    address:,
+    servers_name:,
     db_name:,
     db_pool_size:,
     db_url:,
@@ -137,6 +146,12 @@ pub fn start_program(config: ProgramConfig) {
   let assert Ok(_) =
     supervisor.new(supervisor.OneForOne)
     |> supervisor.add(db_pool_supervised)
+    |> supervisor.add(servers.supervised(
+      config.servers_name,
+      config.db_name,
+      config.address,
+    ))
+    |> supervisor.add(pubsub.supervised(config.pubsub_name, config.pubsub_port))
     |> supervisor.add(api.supervised(
       config.db_name,
       config.pubsub_name,
@@ -144,7 +159,6 @@ pub fn start_program(config: ProgramConfig) {
       one_off_caches,
       config.api_port,
     ))
-    |> supervisor.add(pubsub.supervised(config.pubsub_name, config.pubsub_port))
     |> multiple_shards(config.shards)
     |> supervisor.start
 }
