@@ -6,6 +6,7 @@ import gleam/int
 import gleam/list
 import gleam/otp/actor
 import gleam/otp/supervision
+import gleam/result
 import gleam/set
 import joblot/pubsub/channel
 import joblot/pubsub/client
