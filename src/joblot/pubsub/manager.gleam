@@ -68,12 +68,16 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
     types.MgrHeartbeat -> handle_heartbeat(state)
     types.GetChannel(name, reply_with) ->
       handle_get_channel(name, reply_with, state)
-    types.InitServer(ref, subject) -> handle_init_server(ref, subject, state)
+    types.RegisterServer(ref, subject) ->
+      handle_register_server(ref, subject, state)
     types.CloseServer(ref) -> handle_close_server(ref, state)
     types.ClientAddresses(reply_with) ->
       handle_client_addresses(reply_with, state)
-    types.InitClient(addr, subject) -> handle_init_client(addr, subject, state)
+    types.RegisterClient(addr, subject) ->
+      handle_register_client(addr, subject, state)
     types.CloseClient(addr) -> handle_close_client(addr, state)
+    types.RegisterChannel(id, subject) ->
+      handle_register_channel(id, subject, state)
   }
 }
 
@@ -83,36 +87,19 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
   process.spawn(fn() {
     let state = state
 
-    let server_connections =
-      dict.values(state.servers)
-      |> list.map(types.ServerConnection)
-      |> set.from_list
-    let client_connections =
-      dict.values(state.clients)
-      |> list.map(types.ClientConnection)
-      |> set.from_list
-
-    let connections = set.union(server_connections, client_connections)
-
-    set.each(connections, fn(connection) {
-      let set_without_connection = set.delete(connections, connection)
-      let time_after = int.random(heartbeat_interval_ms / 2)
-
-      case connection {
-        types.ServerConnection(subject) ->
-          process.send_after(
-            subject,
-            time_after,
-            types.SrvHeartbeat(state.channels, set_without_connection),
-          )
-        types.ClientConnection(subject) ->
-          process.send_after(
-            subject,
-            time_after,
-            types.CltHeartbeat(state.channels, set_without_connection),
-          )
-      }
+    dict.each(state.clients, fn(_address, client) {
+      let time_after =
+        int.random(heartbeat_interval_ms / 2) + heartbeat_interval_ms / 2
+      process.send_after(client, time_after, types.CltHeartbeat(state.channels))
     })
+
+    dict.each(state.servers, fn(_ref, server) {
+      let time_after =
+        int.random(heartbeat_interval_ms / 2) + heartbeat_interval_ms / 2
+      process.send_after(server, time_after, types.SrvHeartbeat(state.channels))
+    })
+
+    let server_set = dict.values(state.servers) |> set.from_list
 
     dict.each(state.channels, fn(_channel_id, channel_subject) {
       let time_after = int.random(heartbeat_interval_ms / 2)
@@ -120,7 +107,7 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
       process.send_after(
         channel_subject,
         time_after,
-        types.ChHeartbeat(connections),
+        types.ChHeartbeat(server_set),
       )
     })
   })
@@ -182,8 +169,8 @@ fn verify_clients(state: State) -> State {
       case should_kill {
         False -> True
         True -> {
-          process.send(subject, types.Close)
-
+          let assert Ok(pid) = process.subject_owner(subject)
+          process.kill(pid)
           False
         }
       }
@@ -204,10 +191,42 @@ fn handle_get_channel(
   respond_with: process.Subject(process.Subject(types.ChannelMessage)),
   state: State,
 ) -> actor.Next(State, Message) {
-  todo
+  let #(channel, new_state) = {
+    let dict_result = dict.get(state.channels, channel_name)
+    let alive_channel =
+      result.try(dict_result, fn(channel_subject) {
+        let assert Ok(pid) = process.subject_owner(channel_subject)
+        case process.is_alive(pid) {
+          True -> Ok(channel_subject)
+          False -> Error(Nil)
+        }
+      })
+
+    case alive_channel {
+      Ok(channel) -> #(channel, state)
+      Error(_) -> {
+        let assert Ok(new_channel) =
+          channel.start(state.self_name, channel_name)
+        let new_state =
+          State(
+            ..state,
+            channels: dict.insert(
+              state.channels,
+              channel_name,
+              new_channel.data,
+            ),
+          )
+        #(new_channel.data, new_state)
+      }
+    }
+  }
+
+  process.send(respond_with, channel)
+
+  actor.continue(new_state)
 }
 
-fn handle_init_server(
+fn handle_register_server(
   ref: reference.Reference,
   subject: process.Subject(types.ServerMessage),
   state: State,
@@ -233,7 +252,7 @@ fn handle_client_addresses(
   actor.continue(state)
 }
 
-fn handle_init_client(
+fn handle_register_client(
   address: String,
   subject: process.Subject(types.ClientMessage),
   state: State,
@@ -247,5 +266,14 @@ fn handle_close_client(
   state: State,
 ) -> actor.Next(State, Message) {
   State(..state, clients: dict.delete(state.clients, address))
+  |> actor.continue
+}
+
+fn handle_register_channel(
+  channel_id: String,
+  subject: process.Subject(types.ChannelMessage),
+  state: State,
+) -> actor.Next(State, Message) {
+  State(..state, channels: dict.insert(state.channels, channel_id, subject))
   |> actor.continue
 }

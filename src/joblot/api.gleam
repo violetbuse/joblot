@@ -9,6 +9,7 @@ import joblot/api/one_off_jobs/handlers as one_off_jobs
 import joblot/cache/cron as cron_cache
 import joblot/cache/one_off_jobs as one_off_cache
 import joblot/pubsub
+import joblot/pubsub/server as pubsub_server
 import mist.{type Connection, type ResponseData}
 import pog
 import wisp.{type Request, type Response}
@@ -44,16 +45,12 @@ pub fn supervised(
 
 fn mist_handler(
   req: request.Request(Connection),
-  _context: Context,
+  context: Context,
   wisp_handler: fn(request.Request(Connection)) ->
     response.Response(ResponseData),
 ) -> response.Response(ResponseData) {
   case request.path_segments(req) {
-    ["mist"] ->
-      response.new(200)
-      |> response.set_body(
-        mist.Bytes(bytes_tree.from_string("Hello from mist!")),
-      )
+    ["notifications"] -> pubsub_server.handler(req, context.pubsub)
     _ -> wisp_handler(req)
   }
 }

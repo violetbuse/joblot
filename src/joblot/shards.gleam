@@ -151,7 +151,7 @@ pub fn start_program(config: ProgramConfig) {
       config.db_name,
       config.address,
     ))
-    |> supervisor.add(pubsub.supervised(config.pubsub_name, config.pubsub_port))
+    |> supervisor.add(pubsub.supervised(config.pubsub_name, config.servers_name))
     |> supervisor.add(api.supervised(
       config.db_name,
       config.pubsub_name,

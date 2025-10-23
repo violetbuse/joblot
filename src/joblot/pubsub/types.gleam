@@ -2,7 +2,6 @@ import gleam/dict
 import gleam/erlang/process
 import gleam/erlang/reference
 import gleam/set
-import glisten
 
 pub type ManagerMessage {
   MgrHeartbeat
@@ -10,40 +9,30 @@ pub type ManagerMessage {
     channel_name: String,
     reply_with: process.Subject(process.Subject(ChannelMessage)),
   )
-  InitServer(ref: reference.Reference, subject: process.Subject(ServerMessage))
+  RegisterServer(
+    ref: reference.Reference,
+    subject: process.Subject(ServerMessage),
+  )
   CloseServer(ref: reference.Reference)
   ClientAddresses(reply_with: process.Subject(set.Set(String)))
-  InitClient(address: String, subject: process.Subject(ClientMessage))
+  RegisterClient(address: String, subject: process.Subject(ClientMessage))
   CloseClient(address: String)
+  RegisterChannel(channel_id: String, subject: process.Subject(ChannelMessage))
 }
 
 pub type ChannelMessage {
-  ChHeartbeat(connections: set.Set(Connection))
-  IncomingMessage(message: String)
+  ChHeartbeat(servers: set.Set(process.Subject(ServerMessage)))
   Publish(data: String)
   Subscribe(recv: process.Subject(String))
 }
 
 pub type ServerMessage {
-  SrvHeartbeat(
-    channels: dict.Dict(String, process.Subject(ChannelMessage)),
-    connections: set.Set(Connection),
-  )
+  SrvHeartbeat(channels: dict.Dict(String, process.Subject(ChannelMessage)))
   SrvRefresh
-  SrvOutgoingMessage(channel_id: String, message: String, count_to_limit: Int)
 }
 
 pub type ClientMessage {
   Close
-  CltHeartbeat(
-    channels: dict.Dict(String, process.Subject(ChannelMessage)),
-    connections: set.Set(Connection),
-  )
+  CltHeartbeat(channels: dict.Dict(String, process.Subject(ChannelMessage)))
   CltRefresh
-  CltOutgoingMessage(channel_id: String, message: String, count_to_limit: Int)
-}
-
-pub type Connection {
-  ServerConnection(process.Subject(ServerMessage))
-  ClientConnection(process.Subject(ClientMessage))
 }
