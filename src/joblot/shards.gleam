@@ -119,6 +119,7 @@ fn swim_config(config: Config) -> swim.SwimConfig {
     secret: config.secret,
     bootstrap_addresses: config.bootstrap_addresses,
     region: config.region,
+    shard_count: config.shards |> list.length,
   )
 }
 

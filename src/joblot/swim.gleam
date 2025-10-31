@@ -30,6 +30,7 @@ pub type SwimConfig {
     name: process.Name(Message),
     secret: String,
     region: String,
+    shard_count: Int,
   )
 }
 
@@ -68,6 +69,7 @@ pub type NodeInfo {
     id: String,
     address: uri.Uri,
     region: String,
+    shard_count: Int,
   )
 }
 
@@ -118,6 +120,7 @@ const empty_node_info = NodeInfo(
   id: "",
   address: uri.empty,
   region: "auto",
+  shard_count: 1,
 )
 
 pub fn encode_node_info(node_info: NodeInfo) -> json.Json {
@@ -133,6 +136,7 @@ pub fn encode_node_info(node_info: NodeInfo) -> json.Json {
     #("version", json.int(node_info.version)),
     #("address", json.string(node_info.address |> uri.to_string)),
     #("region", json.string(node_info.region)),
+    #("shard_count", json.int(node_info.shard_count)),
   ])
 }
 
@@ -154,11 +158,19 @@ pub fn decode_node_info() -> decode.Decoder(NodeInfo) {
     use version <- decode.field("version", decode.int)
     use addr_string <- decode.field("address", decode.string)
     use region <- decode.field("region", decode.string)
+    use shard_count <- decode.field("shard_count", decode.int)
 
     case uri.parse(addr_string) {
       Error(_) -> decode.failure(empty_node_info, "uri.Uri")
       Ok(address) ->
-        decode.success(NodeInfo(id:, state:, version:, address:, region:))
+        decode.success(NodeInfo(
+          id:,
+          state:,
+          version:,
+          address:,
+          region:,
+          shard_count:,
+        ))
     }
     // decode.success(NodeInfo(id:, version:, address:))
   }
@@ -178,6 +190,7 @@ fn initialize(
       id: config.server_id,
       address: config.api_address,
       region: config.region,
+      shard_count: config.shard_count,
     ),
     nodes: dict.new(),
     cluster_secret: config.secret,
