@@ -1,1 +1,0 @@
-delete from locks where id = $1 and nonce = $2;

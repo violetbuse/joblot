@@ -1,1 +1,0 @@
-delete from locks where expires_at < $1;

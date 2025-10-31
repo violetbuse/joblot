@@ -1,68 +1,112 @@
-import dot_env/env
+import gleam/bool
 import gleam/bytes_tree
 import gleam/erlang/process
 import gleam/http/request
 import gleam/http/response
-import joblot/api/cron_jobs/handlers as cron_jobs
-import joblot/api/error
-import joblot/api/one_off_jobs/handlers as one_off_jobs
-import joblot/cache/cron as cron_cache
-import joblot/cache/one_off_jobs as one_off_cache
-import joblot/pubsub
-import joblot/pubsub/server as pubsub_server
-import mist.{type Connection, type ResponseData}
+import gleam/json
+import gleam/list
+import gleam/result
+import joblot/swim
+import mist
 import pog
-import wisp.{type Request, type Response}
-import wisp/wisp_mist
 
-type Context {
-  Context(
-    db: process.Name(pog.Message),
-    pubsub: process.Name(pubsub.Message),
-    cron_caches: List(process.Name(cron_cache.Message)),
-    one_off_caches: List(process.Name(one_off_cache.Message)),
+pub type ApiConfig {
+  ApiConfig(
+    port: Int,
+    bind_address: String,
+    swim: process.Subject(swim.Message),
+    db_name: process.Name(pog.Message),
+    secret: String,
   )
 }
 
-pub fn supervised(
-  db: process.Name(pog.Message),
-  pubsub: process.Name(pubsub.Message),
-  cron_caches: List(process.Name(cron_cache.Message)),
-  one_off_caches: List(process.Name(one_off_cache.Message)),
-  port: Int,
-) {
-  let context = Context(db:, pubsub:, cron_caches:, one_off_caches:)
-  let secret = env.get_string_or("SECRET", "shhhh! super secret value!!!!!")
+type Context {
+  Context(
+    swim: process.Subject(swim.Message),
+    db_name: process.Name(pog.Message),
+    secret: String,
+  )
+}
 
-  let wisp_handler = wisp_mist.handler(handle_request(_, context), secret)
+fn not_found() {
+  response.new(404)
+  |> response.set_body(mist.Bytes(bytes_tree.from_string("Not Found")))
+}
 
-  mist.new(mist_handler(_, context, wisp_handler))
+fn not_authorized() {
+  response.new(403)
+  |> response.set_body(mist.Bytes(bytes_tree.from_string("Not Authorized")))
+}
+
+fn handle_swim(
+  req: request.Request(mist.Connection),
+  context: Context,
+) -> response.Response(mist.ResponseData) {
+  let recv = process.new_subject()
+  process.send(context.swim, swim.HandleRequest(req, recv))
+
+  case process.receive(recv, 1000) {
+    Ok(res) -> res
+    Error(_) -> {
+      let json =
+        json.object([
+          #(
+            "error",
+            json.string("Did not receive a response from the swim process"),
+          ),
+        ])
+
+      let byte_tree = json.to_string_tree(json) |> bytes_tree.from_string_tree
+
+      response.new(500)
+      |> response.set_body(mist.Bytes(byte_tree))
+    }
+  }
+}
+
+fn handle_swim_cluster_view(
+  _req: request.Request(mist.Connection),
+  context: Context,
+) -> response.Response(mist.ResponseData) {
+  let view = process.call(context.swim, 1000, swim.GetClusterView)
+  let json = json.object([#("nodes", json.array(view, swim.encode_node_info))])
+
+  let bytes =
+    json.to_string_tree(json) |> bytes_tree.from_string_tree |> mist.Bytes
+
+  response.new(200)
+  |> response.set_header("content-type", "application/json")
+  |> response.set_body(bytes)
+}
+
+fn handle_request(
+  req: request.Request(mist.Connection),
+  context: Context,
+) -> response.Response(mist.ResponseData) {
+  let secret_header = request.get_header(req, "authorization")
+  let secret_param =
+    request.get_query(req)
+    |> result.map(list.key_find(_, "secret_key"))
+    |> result.flatten
+
+  let secret = result.or(secret_header, secret_param) |> result.unwrap("")
+
+  use <- bool.guard(when: secret != context.secret, return: not_authorized())
+
+  case request.path_segments(req) {
+    ["swim"] -> handle_swim(req, context)
+    ["cluster"] -> handle_swim_cluster_view(req, context)
+    _ -> not_found()
+  }
+}
+
+pub fn supervised(config: ApiConfig) {
+  let ctx =
+    Context(swim: config.swim, db_name: config.db_name, secret: config.secret)
+
+  mist.new(handle_request(_, ctx))
   |> mist.bind("0.0.0.0")
   |> mist.with_ipv6
-  |> mist.port(port)
+  |> mist.port(config.port)
   |> mist.supervised
-}
-
-fn mist_handler(
-  req: request.Request(Connection),
-  context: Context,
-  wisp_handler: fn(request.Request(Connection)) ->
-    response.Response(ResponseData),
-) -> response.Response(ResponseData) {
-  case request.path_segments(req) {
-    ["notifications"] -> pubsub_server.handler(req, context.pubsub)
-    _ -> wisp_handler(req)
-  }
-}
-
-fn handle_request(request: Request, context: Context) -> Response {
-  use <- wisp.log_request(request)
-
-  case request.method, request.path_segments(request) {
-    _, ["api", "one_off_jobs", ..path_segments] ->
-      one_off_jobs.one_off_job_router(path_segments, request, context.db)
-    _, ["api", "cron_jobs", ..path_segments] ->
-      cron_jobs.cron_job_router(path_segments, request, context.db)
-    _, _ -> error.to_response(error.NotFoundError)
-  }
 }

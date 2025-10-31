@@ -1,164 +1,139 @@
 import dot_env/env
+import glanoid
+import gleam/bool
 import gleam/erlang/process
+import gleam/io
 import gleam/list
-import gleam/otp/static_supervisor as supervisor
+import gleam/option
+import gleam/otp/static_supervisor
+import gleam/result
+import gleam/string
+import gleam/uri
 import joblot/api
-import joblot/cache/cron as cron_cache
-import joblot/cache/one_off_jobs as one_off_cache
-import joblot/lock
-import joblot/pubsub
-import joblot/reconciler
-import joblot/registry
-import joblot/scanner
-import joblot/servers
-import joblot/target
+import joblot/swim
 import pog
 
-pub type ProgramConfig {
-  ProgramConfig(
-    address: String,
-    servers_name: process.Name(servers.Message),
+pub type Config {
+  Config(
+    listen_address: uri.Uri,
+    bind_address: String,
+    server_id: String,
+    bootstrap_addresses: List(uri.Uri),
+    port: Int,
+    region: String,
+    secret: String,
     db_name: process.Name(pog.Message),
     db_url: String,
     db_pool_size: Int,
-    pubsub_name: process.Name(pubsub.Message),
-    pubsub_port: Int,
-    api_port: Int,
-    shards: List(ShardConfig),
+    swim_name: process.Name(swim.Message),
+    shards: List(Shard),
   )
 }
 
-pub type ShardConfig {
-  ShardConfig(
+pub type Shard {
+  Shard(
     shard_id: Int,
+    secret: String,
+    region: String,
     db_name: process.Name(pog.Message),
-    pubsub_name: process.Name(pubsub.Message),
-    cron_cache: process.Name(cron_cache.Message),
-    one_off_cache: process.Name(one_off_cache.Message),
-    target: process.Name(target.Message),
-    registry: process.Name(registry.Message),
-    locks: process.Name(lock.LockMgrMessage),
   )
 }
 
-pub fn create_config(shard_count: Int) -> ProgramConfig {
-  let address = env.get_string_or("HOSTNAME", "127.0.0.1:9090")
+pub fn create_config(shard_count: Int) -> Config {
+  let assert Ok(nanoid) = glanoid.make_generator(glanoid.default_alphabet)
 
-  let servers_name = process.new_name("servers_watcher")
+  let assert Ok(hostname) = env.get_string("HOSTNAME")
+  let bind_address = env.get_string_or("BIND_ADDRESS", "0.0.0.0")
+  let assert Ok(port) = env.get_int("PORT")
+  let secret = env.get_string_or("SECRET", "")
+  let region = env.get_string_or("REGION", "auto")
 
-  let db_url =
-    env.get_string_or(
-      "DATABASE_URL",
-      "postgres://postgres:postgres@localhost:5432/postgres",
+  let listen_address =
+    uri.Uri(
+      ..uri.empty,
+      scheme: option.Some("http"),
+      host: option.Some(hostname),
+      port: option.Some(port),
+      path: "/",
     )
+  let bootstrap_addresses =
+    env.get_string_or("BOOTSTRAP_NODES", "")
+    |> string.split(",")
+    |> list.filter(fn(str) { string.is_empty(str) |> bool.negate })
+    |> list.map(uri.parse)
+    |> result.values
 
+  list.map(bootstrap_addresses, uri.to_string) |> list.each(io.println)
+
+  let server_id = env.get_string_or("SERVER_ID", nanoid(21))
+  let assert Ok(db_url) = env.get_string("DATABASE_URL")
   let db_pool_size = env.get_int_or("POOL_SIZE", 10)
-
   let db_name = process.new_name("db_pool")
 
-  let pubsub_name = process.new_name("pubsub")
+  let swim_name = process.new_name("swim")
 
-  let pubsub_port = env.get_int_or("PUBSUB_PORT", 9090)
-
-  let api_port = env.get_int_or("API_PORT", 8080)
-
-  ProgramConfig(
-    address:,
-    servers_name:,
+  Config(
+    listen_address:,
+    bind_address:,
+    server_id:,
+    bootstrap_addresses:,
+    port:,
+    secret:,
+    region:,
     db_name:,
-    db_pool_size:,
     db_url:,
-    pubsub_name:,
-    pubsub_port:,
-    api_port:,
+    db_pool_size:,
+    swim_name:,
     shards: list.range(from: 1, to: shard_count)
-      |> list.map(fn(local_shard_id) {
-        ShardConfig(
-          shard_id: local_shard_id,
-          db_name:,
-          pubsub_name:,
-          cron_cache: process.new_name("cron_cache"),
-          one_off_cache: process.new_name("one_off_cache"),
-          target: process.new_name("target"),
-          registry: process.new_name("registry"),
-          locks: process.new_name("locks_manager"),
-        )
-      }),
+      |> list.map(fn(shard_id) { Shard(shard_id:, secret:, region:, db_name:) }),
   )
 }
 
-fn create_shard_supervisor(config: ShardConfig) {
-  supervisor.new(supervisor.OneForOne)
-  |> supervisor.add(cron_cache.supervised(
-    config.cron_cache,
-    config.db_name,
-    config.pubsub_name,
-  ))
-  |> supervisor.add(one_off_cache.supervised(
-    config.one_off_cache,
-    config.db_name,
-    config.pubsub_name,
-  ))
-  |> supervisor.add(target.supervised(config.target, config.shard_id))
-  |> supervisor.add(lock.lock_manager_supervised(config.locks, config.db_name))
-  |> supervisor.add(registry.supervised(
-    config.registry,
-    config.db_name,
-    config.locks,
-    config.cron_cache,
-    config.one_off_cache,
-  ))
-  |> supervisor.add(reconciler.supervised(
-    target: config.target,
-    registry: config.registry,
-  ))
-  |> supervisor.add(scanner.supervised(config.db_name, config.target))
+fn create_shard_supervisor(_config: Shard) {
+  static_supervisor.new(static_supervisor.OneForOne)
+  |> static_supervisor.supervised
 }
 
-pub fn start_shard(config: ShardConfig) {
-  let assert Ok(_) = create_shard_supervisor(config) |> supervisor.start
-}
-
-fn shard_supervised(config: ShardConfig) {
-  create_shard_supervisor(config) |> supervisor.supervised
-}
-
-fn multiple_shards(
-  builder: supervisor.Builder,
-  config: List(ShardConfig),
-) -> supervisor.Builder {
+fn multiple_shards(builder: static_supervisor.Builder, config: List(Shard)) {
   case config {
     [] -> builder
     [first, ..rest] ->
-      supervisor.add(builder, shard_supervised(first)) |> multiple_shards(rest)
+      static_supervisor.add(builder, create_shard_supervisor(first))
+      |> multiple_shards(rest)
   }
 }
 
-pub fn start_program(config: ProgramConfig) {
+fn swim_config(config: Config) -> swim.SwimConfig {
+  swim.SwimConfig(
+    api_address: config.listen_address,
+    server_id: config.server_id,
+    name: config.swim_name,
+    secret: config.secret,
+    bootstrap_addresses: config.bootstrap_addresses,
+    region: config.region,
+  )
+}
+
+fn api_config(config: Config) -> api.ApiConfig {
+  api.ApiConfig(
+    port: config.port,
+    swim: config.swim_name |> process.named_subject,
+    db_name: config.db_name,
+    secret: config.secret,
+    bind_address: config.bind_address,
+  )
+}
+
+pub fn start_program(config: Config) {
   let assert Ok(pool_config) = pog.url_config(config.db_name, config.db_url)
   let db_pool_supervised =
     pool_config |> pog.pool_size(config.db_pool_size) |> pog.supervised
 
-  let cron_caches = list.map(config.shards, fn(shard) { shard.cron_cache })
-  let one_off_caches =
-    list.map(config.shards, fn(shard) { shard.one_off_cache })
-
   let assert Ok(_) =
-    supervisor.new(supervisor.OneForOne)
-    |> supervisor.add(db_pool_supervised)
-    |> supervisor.add(servers.supervised(
-      config.servers_name,
-      config.db_name,
-      config.address,
-    ))
-    |> supervisor.add(pubsub.supervised(config.pubsub_name, config.servers_name))
-    |> supervisor.add(api.supervised(
-      config.db_name,
-      config.pubsub_name,
-      cron_caches,
-      one_off_caches,
-      config.api_port,
-    ))
+    static_supervisor.new(static_supervisor.OneForOne)
+    |> static_supervisor.add(db_pool_supervised)
+    |> static_supervisor.add(swim_config(config) |> swim.supervised)
+    |> static_supervisor.add(api_config(config) |> api.supervised)
     |> multiple_shards(config.shards)
-    |> supervisor.start
+    |> static_supervisor.start
 }
