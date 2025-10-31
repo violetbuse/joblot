@@ -68,8 +68,18 @@ fn handle_swim_cluster_view(
   _req: request.Request(mist.Connection),
   context: Context,
 ) -> response.Response(mist.ResponseData) {
-  let view = process.call(context.swim, 1000, swim.GetClusterView)
-  let json = json.object([#("nodes", json.array(view, swim.encode_node_info))])
+  let #(self, nodes) = process.call(context.swim, 1000, swim.GetClusterView)
+  let json =
+    json.object([
+      #("self", swim.encode_node_info(self)),
+      #(
+        "nodes",
+        json.array(
+          nodes |> list.sort(swim.compare_state),
+          swim.encode_node_info,
+        ),
+      ),
+    ])
 
   let bytes =
     json.to_string_tree(json) |> bytes_tree.from_string_tree |> mist.Bytes

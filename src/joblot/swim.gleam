@@ -7,12 +7,11 @@ import gleam/http
 import gleam/http/request
 import gleam/http/response
 import gleam/int
-
-// import gleam/httpc
 import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option
+import gleam/order
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
@@ -46,7 +45,7 @@ pub type Message {
   FailedSync(node_id: String)
   MarkDead(node_id: String)
   MarkAlive(node_id: String)
-  GetClusterView(recv: process.Subject(List(NodeInfo)))
+  GetClusterView(recv: process.Subject(#(NodeInfo, List(NodeInfo))))
 }
 
 pub type ResponseChannel =
@@ -78,6 +77,20 @@ pub type NodeState {
   Dead
 }
 
+pub fn compare_state(a: NodeInfo, b: NodeInfo) -> order.Order {
+  case a.state, b.state {
+    Alive, Alive -> order.Eq
+    Alive, Suspect -> order.Lt
+    Alive, Dead -> order.Lt
+    Suspect, Alive -> order.Gt
+    Suspect, Suspect -> order.Eq
+    Suspect, Dead -> order.Lt
+    Dead, Alive -> order.Gt
+    Dead, Suspect -> order.Gt
+    Dead, Dead -> order.Eq
+  }
+}
+
 fn degrade_state(node: NodeInfo) -> NodeInfo {
   let new_state = case node.state {
     Alive -> Suspect
@@ -87,15 +100,15 @@ fn degrade_state(node: NodeInfo) -> NodeInfo {
   NodeInfo(..node, state: new_state)
 }
 
-fn is_alive(node: NodeInfo) -> Bool {
+pub fn is_alive(node: NodeInfo) -> Bool {
   node.state == Alive
 }
 
-fn is_suspect(node: NodeInfo) -> Bool {
+pub fn is_suspect(node: NodeInfo) -> Bool {
   node.state == Suspect
 }
 
-fn is_dead(node: NodeInfo) -> Bool {
+pub fn is_dead(node: NodeInfo) -> Bool {
   node.state == Dead
 }
 
@@ -201,8 +214,10 @@ fn heartbeat_sync(state: State) {
     let nodelist = dict.values(state.nodes)
 
     let alive_nodes = list.filter(nodelist, is_alive) |> list.sample(10)
-    let sus_nodes = list.filter(nodelist, is_suspect) |> list.sample(2)
-    let dead_nodes = list.filter(nodelist, is_dead) |> list.sample(5)
+    let sus_nodes =
+      list.filter(nodelist, is_suspect) |> list.sample(int.random(1))
+    let dead_nodes =
+      list.filter(nodelist, is_dead) |> list.sample(int.random(1))
 
     let candidates =
       alive_nodes |> list.append(sus_nodes) |> list.append(dead_nodes)
@@ -311,7 +326,7 @@ fn handle_self_info(state: State, info: NodeInfo) -> actor.Next(State, Message) 
         case existing {
           option.None -> info
           option.Some(existing_node)
-            if existing_node != info && existing_node.version == info.version
+            if existing_node != info && existing_node.version <= info.version
           -> info
           option.Some(existing_node) -> existing_node
         }
@@ -323,6 +338,10 @@ fn handle_self_info(state: State, info: NodeInfo) -> actor.Next(State, Message) 
 fn handle_you_info(state: State, info: NodeInfo) -> actor.Next(State, Message) {
   let next_version = {
     use <- bool.guard(when: state.self == info, return: info.version)
+    use <- bool.guard(
+      when: state.self.version > info.version,
+      return: state.self.version,
+    )
     use <- bool.guard(
       when: state.self.version <= info.version,
       return: info.version + 1,
@@ -425,10 +444,9 @@ fn handle_mark_alive(
 
 fn get_cluster_view(
   state: State,
-  recv: process.Subject(List(NodeInfo)),
+  recv: process.Subject(#(NodeInfo, List(NodeInfo))),
 ) -> actor.Next(State, Message) {
-  let list = [state.self, ..dict.values(state.nodes)]
-  process.send(recv, list)
+  process.send(recv, #(state.self, dict.values(state.nodes)))
   actor.continue(state)
 }
 

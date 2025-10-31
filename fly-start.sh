@@ -25,7 +25,6 @@ echo "bootstrap_nodes=$BOOTSTRAP_NODES"
 REGION="auto"
 
 case $FLY_REGION in
-
   ams | cdg | fra | lhr | arn)
     REGION="eu-west"
     ;;
@@ -57,10 +56,10 @@ case $FLY_REGION in
   bom)
     REGION="asia-south"
     ;;
-
 esac
 
 export REGION=$REGION
+export VALID_REGIONS="eu-west,us-east"
 
 PACKAGE=joblot
 BASE=$(dirname "$0")

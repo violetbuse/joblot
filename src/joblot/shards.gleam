@@ -21,6 +21,7 @@ pub type Config {
     bootstrap_addresses: List(uri.Uri),
     port: Int,
     region: String,
+    valid_regions: List(String),
     secret: String,
     db_name: process.Name(pog.Message),
     db_url: String,
@@ -47,6 +48,12 @@ pub fn create_config(shard_count: Int) -> Config {
   let assert Ok(port) = env.get_int("PORT")
   let secret = env.get_string_or("SECRET", "")
   let region = env.get_string_or("REGION", "auto")
+
+  let valid_regions =
+    env.get_string_or("VALID_REGIONS", region)
+    |> string.split(",")
+    |> list.filter(fn(str) { string.is_empty(str) |> bool.negate })
+    |> list.map(string.lowercase)
 
   let listen_address =
     uri.Uri(
@@ -80,6 +87,7 @@ pub fn create_config(shard_count: Int) -> Config {
     port:,
     secret:,
     region:,
+    valid_regions:,
     db_name:,
     db_url:,
     db_pool_size:,
