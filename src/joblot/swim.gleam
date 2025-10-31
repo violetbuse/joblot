@@ -6,7 +6,9 @@ import gleam/erlang/process
 import gleam/http
 import gleam/http/request
 import gleam/http/response
-import gleam/httpc
+import gleam/int
+
+// import gleam/httpc
 import gleam/io
 import gleam/json
 import gleam/list
@@ -15,6 +17,7 @@ import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
 import gleam/uri
+import httpp/send
 import joblot/util
 import mist
 
@@ -232,7 +235,25 @@ fn heartbeat_sync(state: State) {
 
 fn try_bootstrap(state: State) {
   process.spawn(fn() {
-    list.sample(state.bootstrap_addresses, 5)
+    let stringify_addr = fn(uri: uri.Uri) -> String {
+      let assert option.Some(hostname) = uri.host
+      let assert option.Some(port) = uri.port
+
+      hostname <> ":" <> int.to_string(port)
+    }
+
+    let already_connected_nodes =
+      [state.self, ..dict.values(state.nodes)]
+      |> list.map(fn(node) { stringify_addr(node.address) })
+
+    let not_connected_bootstrap_nodes =
+      list.filter(state.bootstrap_addresses, fn(addr) {
+        let key = stringify_addr(addr)
+
+        list.contains(already_connected_nodes, key) |> bool.negate
+      })
+
+    list.sample(not_connected_bootstrap_nodes, 5)
     |> list.each(fn(address) {
       let result =
         send_sync_request(
@@ -310,7 +331,7 @@ fn handle_you_info(state: State, info: NodeInfo) -> actor.Next(State, Message) {
   }
 
   case info != state.self {
-    False -> io.println("you value matches up")
+    False -> Nil
     True -> io.println("you & self mismatch")
   }
 
@@ -520,7 +541,7 @@ fn handle_sync_request(
   self: NodeInfo,
   subset: List(NodeInfo),
 ) -> actor.Next(State, Message) {
-  io.println("Incoming sync from " <> self.id)
+  // io.println("Incoming sync from " <> self.id)
   process.send(state.subject, SelfInfo(self))
   list.each(subset, fn(node) { process.send(state.subject, Info(node)) })
 
@@ -563,7 +584,7 @@ fn send_sync_request(
     |> request.set_body(data)
 
   use response <- result.try(
-    httpc.send(request)
+    send.send(request)
     |> util.log_error(
       "Error getting result from " <> request.host <> " for sync request",
     )
@@ -606,7 +627,7 @@ fn handle_ping(
   recv: ResponseChannel,
   state: State,
 ) -> actor.Next(State, Message) {
-  io.println("Incoming ping!")
+  // io.println("Incoming ping!")
   let response = PingResponse |> encode_ping_response
   let response_bytes =
     response
@@ -635,7 +656,7 @@ fn send_ping(api_address: uri.Uri, secret: String) -> Result(PingResponse, Nil) 
     |> request.set_body(data)
 
   use response <- result.try(
-    httpc.send(request)
+    send.send(request)
     |> util.log_error(
       "Error fetching http from " <> request.host <> " for ping",
     )
@@ -676,7 +697,7 @@ fn handle_request_ping(
   recv: ResponseChannel,
   to_ping: NodeInfo,
 ) -> actor.Next(State, Message) {
-  io.println("Incoming request ping for " <> to_ping.id)
+  // io.println("Incoming request ping for " <> to_ping.id)
   process.spawn(fn() {
     let successful = case send_ping(to_ping.address, state.cluster_secret) {
       Error(_) -> False
@@ -716,7 +737,7 @@ fn send_request_ping(
     |> request.set_body(data)
 
   use response <- result.try(
-    httpc.send(request)
+    send.send(request)
     |> util.log_error(
       "Error http fetch from " <> request.host <> " for request ping",
     )
