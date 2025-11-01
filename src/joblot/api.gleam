@@ -29,19 +29,52 @@ type Context {
 }
 
 fn not_found() {
+  let data =
+    json.object([#("error", json.string("Not Found"))])
+    |> json.to_string_tree
+    |> bytes_tree.from_string_tree
+    |> mist.Bytes
+
   response.new(404)
-  |> response.set_body(mist.Bytes(bytes_tree.from_string("Not Found")))
+  |> response.set_body(data)
 }
 
 fn not_authorized() {
+  let data =
+    json.object([#("error", json.string("Not Authorized."))])
+    |> json.to_string_tree
+    |> bytes_tree.from_string_tree
+    |> mist.Bytes
+
   response.new(403)
-  |> response.set_body(mist.Bytes(bytes_tree.from_string("Not Authorized")))
+  |> response.set_body(data)
+}
+
+fn use_protected(
+  req: request.Request(mist.Connection),
+  context: Context,
+  callback: fn(request.Request(mist.Connection), Context) ->
+    response.Response(mist.ResponseData),
+) -> response.Response(mist.ResponseData) {
+  let secret_header = request.get_header(req, "authorization")
+  let secret_param =
+    request.get_query(req)
+    |> result.map(list.key_find(_, "secret_key"))
+    |> result.flatten
+
+  let secret = result.or(secret_header, secret_param) |> result.unwrap("")
+
+  use <- bool.guard(when: secret != context.secret, return: not_authorized())
+
+  callback(req, context)
 }
 
 fn handle_swim(
   req: request.Request(mist.Connection),
   context: Context,
 ) -> response.Response(mist.ResponseData) {
+  use req, context <- use_protected(req, context)
+
   let recv = process.new_subject()
   process.send(context.swim, swim.HandleRequest(req, recv))
 
@@ -65,9 +98,11 @@ fn handle_swim(
 }
 
 fn handle_swim_cluster_view(
-  _req: request.Request(mist.Connection),
+  req: request.Request(mist.Connection),
   context: Context,
 ) -> response.Response(mist.ResponseData) {
+  use _, context <- use_protected(req, context)
+
   let #(self, nodes) = process.call(context.swim, 1000, swim.GetClusterView)
   let json =
     json.object([
@@ -86,23 +121,24 @@ fn handle_swim_cluster_view(
   |> response.set_body(bytes)
 }
 
+fn handle_health_check() -> response.Response(mist.ResponseData) {
+  let data =
+    json.object([#("healthy", json.bool(True))])
+    |> json.to_string_tree
+    |> bytes_tree.from_string_tree
+    |> mist.Bytes
+
+  response.new(200) |> response.set_body(data)
+}
+
 fn handle_request(
   req: request.Request(mist.Connection),
   context: Context,
 ) -> response.Response(mist.ResponseData) {
-  let secret_header = request.get_header(req, "authorization")
-  let secret_param =
-    request.get_query(req)
-    |> result.map(list.key_find(_, "secret_key"))
-    |> result.flatten
-
-  let secret = result.or(secret_header, secret_param) |> result.unwrap("")
-
-  use <- bool.guard(when: secret != context.secret, return: not_authorized())
-
   case request.path_segments(req) {
     ["swim"] -> handle_swim(req, context)
     ["cluster"] -> handle_swim_cluster_view(req, context)
+    ["health"] -> handle_health_check()
     _ -> not_found()
   }
 }

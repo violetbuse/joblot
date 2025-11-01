@@ -33,6 +33,10 @@ case $FLY_REGION in
     REGION="us-east"
     ;;
 
+  lax | sjc)
+    REGION="us-west"
+    ;;
+
   nrt | sin)
     REGION="asia-east"
     ;;
@@ -44,7 +48,7 @@ case $FLY_REGION in
 esac
 
 export REGION=$REGION
-export VALID_REGIONS="eu-west,us-east,asia-east"
+export VALID_REGIONS="eu-west,us-east,us-west,asia-east"
 
 PACKAGE=joblot
 BASE=$(dirname "$0")
