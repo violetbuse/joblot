@@ -194,7 +194,7 @@ pub fn decode_node_info() -> decode.Decoder(NodeInfo) {
 }
 
 pub type NodeStats {
-  NodeStats(latency: option.Option(Int))
+  NodeStats(latency: option.Option(Int), prev_latencies: List(Int))
 }
 
 pub fn encode_node_stats(stats: NodeStats) -> json.Json {
@@ -480,8 +480,12 @@ fn handle_mark_dead(state: State, node_id: String) -> actor.Next(State, Message)
   let new_stats =
     dict.upsert(state.node_stats, node_id, fn(stats) {
       case stats {
-        option.None -> NodeStats(latency: option.None)
-        option.Some(_existing) -> NodeStats(latency: option.None)
+        option.None -> NodeStats(latency: option.None, prev_latencies: [])
+        option.Some(existing) ->
+          NodeStats(
+            latency: option.None,
+            prev_latencies: existing.prev_latencies,
+          )
       }
     })
 
@@ -514,8 +518,21 @@ fn handle_node_latency(
   let new_stats =
     dict.upsert(state.node_stats, node_id, fn(stats) {
       case stats {
-        option.None -> NodeStats(latency: option.Some(latency))
-        option.Some(..) -> NodeStats(latency: option.Some(latency))
+        option.None ->
+          NodeStats(latency: option.Some(latency), prev_latencies: [latency])
+        option.Some(NodeStats(prev_latencies:, ..)) -> {
+          let new_prev_latencies = [latency, ..list.take(prev_latencies, 3)]
+
+          let average = {
+            list.map(new_prev_latencies, int.to_float)
+            |> float.sum
+            |> float.divide(list.length(new_prev_latencies) |> int.to_float)
+            |> option.from_result
+            |> option.map(float.round)
+          }
+
+          NodeStats(latency: average, prev_latencies: new_prev_latencies)
+        }
       }
     })
 
