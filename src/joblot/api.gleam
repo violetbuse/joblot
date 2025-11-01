@@ -5,6 +5,7 @@ import gleam/http/request
 import gleam/http/response
 import gleam/json
 import gleam/list
+import gleam/option
 import gleam/result
 import joblot/swim
 import mist
@@ -104,12 +105,22 @@ fn handle_swim_cluster_view(
   use _, context <- use_protected(req, context)
 
   let #(self, nodes) = process.call(context.swim, 1000, swim.GetClusterView)
+  let sorted_nodes =
+    process.call(context.swim, 1000, swim.GetClosestNodes(
+      list.map(nodes, fn(node) { node.id }),
+      _,
+    ))
   let json =
     json.object([
-      #("self", swim.encode_node_info(self)),
+      #("self", swim.encode_node_info(self, option.None)),
       #(
         "nodes",
-        json.array(nodes |> list.sort(swim.compare_node), swim.encode_node_info),
+        json.preprocessed_array(
+          list.map(sorted_nodes, fn(node) {
+            process.call(context.swim, 1000, swim.GetNodeStats(node.id, _))
+            |> swim.encode_node_info(node, _)
+          }),
+        ),
       ),
     ])
 

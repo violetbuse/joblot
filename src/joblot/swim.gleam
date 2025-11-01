@@ -3,6 +3,7 @@ import gleam/bytes_tree
 import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/float
 import gleam/http
 import gleam/http/request
 import gleam/http/response
@@ -16,12 +17,14 @@ import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
 import gleam/string
+import gleam/time/duration
+import gleam/time/timestamp
 import gleam/uri
 import httpp/send
 import joblot/util
 import mist
 
-const heartbeat_interval = 5000
+const heartbeat_interval = 15_000
 
 pub type SwimConfig {
   SwimConfig(
@@ -47,8 +50,12 @@ pub type Message {
   FailedSync(node_id: String)
   MarkDead(node_id: String)
   MarkAlive(node_id: String)
+  RegisterLatency(node_id: String, latency: Int)
   GetClusterView(recv: process.Subject(#(NodeInfo, List(NodeInfo))))
   GetLocalNode(recv: process.Subject(NodeInfo))
+  GetNode(node_id: String, recv: process.Subject(option.Option(NodeInfo)))
+  GetNodeStats(node_id: String, recv: process.Subject(option.Option(NodeStats)))
+  GetClosestNodes(node_ids: List(String), recv: process.Subject(List(NodeInfo)))
 }
 
 pub type ResponseChannel =
@@ -59,6 +66,7 @@ type State {
     subject: process.Subject(Message),
     self: NodeInfo,
     nodes: dict.Dict(String, NodeInfo),
+    node_stats: dict.Dict(String, NodeStats),
     cluster_secret: String,
     bootstrap_addresses: List(uri.Uri),
   )
@@ -128,7 +136,10 @@ const empty_node_info = NodeInfo(
   shard_count: 1,
 )
 
-pub fn encode_node_info(node_info: NodeInfo) -> json.Json {
+pub fn encode_node_info(
+  node_info: NodeInfo,
+  with stats: option.Option(NodeStats),
+) -> json.Json {
   let status_string = case node_info.state {
     Alive -> "alive"
     Suspect -> "suspect"
@@ -142,6 +153,7 @@ pub fn encode_node_info(node_info: NodeInfo) -> json.Json {
     #("address", json.string(node_info.address |> uri.to_string)),
     #("region", json.string(node_info.region)),
     #("shard_count", json.int(node_info.shard_count)),
+    #("stats", json.nullable(stats, encode_node_stats)),
   ])
 }
 
@@ -181,6 +193,14 @@ pub fn decode_node_info() -> decode.Decoder(NodeInfo) {
   }
 }
 
+pub type NodeStats {
+  NodeStats(latency: option.Option(Int))
+}
+
+pub fn encode_node_stats(stats: NodeStats) -> json.Json {
+  json.object([#("latency", json.nullable(stats.latency, json.int))])
+}
+
 fn initialize(
   self: process.Subject(Message),
   config: SwimConfig,
@@ -198,6 +218,7 @@ fn initialize(
       shard_count: config.shard_count,
     ),
     nodes: dict.new(),
+    node_stats: dict.new(),
     cluster_secret: config.secret,
     bootstrap_addresses: config.bootstrap_addresses,
   ))
@@ -214,8 +235,14 @@ fn on_message(state: State, message: Message) -> actor.Next(State, Message) {
     FailedSync(node_id) -> handle_failed_sync(state, node_id)
     MarkDead(node_id) -> handle_mark_dead(state, node_id)
     MarkAlive(node_id) -> handle_mark_alive(state, node_id)
-    GetClusterView(recv) -> get_cluster_view(state, recv)
-    GetLocalNode(recv) -> get_local_node(state, recv)
+    RegisterLatency(node_id, latency) ->
+      handle_node_latency(state, node_id, latency)
+    GetClusterView(recv) -> handle_get_cluster_view(state, recv)
+    GetLocalNode(recv) -> handle_get_local_node(state, recv)
+    GetNode(node_id, recv) -> handle_get_node_info(state, node_id, recv)
+    GetNodeStats(node_id, recv) -> handle_get_node_stats(state, node_id, recv)
+    GetClosestNodes(node_ids, recv) ->
+      handle_get_closest_nodes(state, node_ids, recv)
   }
 }
 
@@ -232,7 +259,7 @@ fn heartbeat_sync(state: State) {
   process.spawn(fn() {
     let nodelist = dict.values(state.nodes)
 
-    let alive_nodes = list.filter(nodelist, is_alive) |> list.sample(10)
+    let alive_nodes = list.filter(nodelist, is_alive) |> list.sample(3)
     let sus_nodes =
       list.filter(nodelist, is_suspect) |> list.sample(int.random(1))
     let dead_nodes =
@@ -243,6 +270,8 @@ fn heartbeat_sync(state: State) {
 
     list.each(candidates, fn(candidate) {
       process.spawn(fn() {
+        let start = timestamp.system_time()
+
         let result =
           send_sync_request(
             candidate.address,
@@ -251,9 +280,17 @@ fn heartbeat_sync(state: State) {
             state.nodes |> dict.values |> list.sample(10),
           )
 
+        let end = timestamp.system_time()
+        let latency =
+          timestamp.difference(start, end)
+          |> duration.to_seconds()
+          |> float.multiply(1000.0)
+          |> float.round
+
         case result {
           Error(_) -> process.send(state.subject, FailedSync(candidate.id))
           Ok(sync_response) -> {
+            process.send(state.subject, RegisterLatency(candidate.id, latency:))
             process.send(state.subject, MarkAlive(sync_response.self.id))
             process.send(state.subject, SelfInfo(sync_response.self))
             process.send(state.subject, YouInfo(sync_response.you))
@@ -440,7 +477,15 @@ fn handle_mark_dead(state: State, node_id: String) -> actor.Next(State, Message)
       )
   }
 
-  actor.continue(State(..state, nodes: new_nodes))
+  let new_stats =
+    dict.upsert(state.node_stats, node_id, fn(stats) {
+      case stats {
+        option.None -> NodeStats(latency: option.None)
+        option.Some(_existing) -> NodeStats(latency: option.None)
+      }
+    })
+
+  actor.continue(State(..state, nodes: new_nodes, node_stats: new_stats))
 }
 
 fn handle_mark_alive(
@@ -461,7 +506,23 @@ fn handle_mark_alive(
   actor.continue(State(..state, nodes: new_nodes))
 }
 
-fn get_cluster_view(
+fn handle_node_latency(
+  state: State,
+  node_id: String,
+  latency: Int,
+) -> actor.Next(State, Message) {
+  let new_stats =
+    dict.upsert(state.node_stats, node_id, fn(stats) {
+      case stats {
+        option.None -> NodeStats(latency: option.Some(latency))
+        option.Some(..) -> NodeStats(latency: option.Some(latency))
+      }
+    })
+
+  actor.continue(State(..state, node_stats: new_stats))
+}
+
+fn handle_get_cluster_view(
   state: State,
   recv: process.Subject(#(NodeInfo, List(NodeInfo))),
 ) -> actor.Next(State, Message) {
@@ -469,11 +530,55 @@ fn get_cluster_view(
   actor.continue(state)
 }
 
-fn get_local_node(
+fn handle_get_local_node(
   state: State,
   recv: process.Subject(NodeInfo),
 ) -> actor.Next(State, Message) {
   process.send(recv, state.self)
+  actor.continue(state)
+}
+
+fn handle_get_node_info(
+  state: State,
+  node_id: String,
+  recv: process.Subject(option.Option(NodeInfo)),
+) -> actor.Next(State, Message) {
+  dict.get(state.nodes, node_id) |> option.from_result |> process.send(recv, _)
+  actor.continue(state)
+}
+
+fn handle_get_node_stats(
+  state: State,
+  node_id: String,
+  recv: process.Subject(option.Option(NodeStats)),
+) -> actor.Next(State, Message) {
+  dict.get(state.node_stats, node_id)
+  |> option.from_result
+  |> process.send(recv, _)
+  actor.continue(state)
+}
+
+fn handle_get_closest_nodes(
+  state: State,
+  node_ids: List(String),
+  recv: process.Subject(List(NodeInfo)),
+) -> actor.Next(State, Message) {
+  dict.filter(state.nodes, fn(id, _) { list.contains(node_ids, id) })
+  |> dict.values
+  |> list.filter_map(fn(node) {
+    case dict.get(state.node_stats, node.id) {
+      Error(_) -> Error(Nil)
+      Ok(stats) ->
+        case stats.latency {
+          option.None -> Error(Nil)
+          option.Some(latency) -> Ok(#(node, latency))
+        }
+    }
+  })
+  |> list.sort(fn(a, b) { int.compare(a.1, b.1) })
+  |> list.map(fn(data) { data.0 })
+  |> process.send(recv, _)
+
   actor.continue(state)
 }
 
@@ -488,14 +593,14 @@ fn encode_request(request: Request) -> json.Json {
     Sync(self, subset) ->
       json.object([
         #("type", json.string("sync")),
-        #("self", encode_node_info(self)),
-        #("subset", json.array(subset, encode_node_info)),
+        #("self", encode_node_info(self, option.None)),
+        #("subset", json.array(subset, encode_node_info(_, option.None))),
       ])
     Ping -> json.object([#("type", json.string("ping"))])
     RequestPing(node_info) ->
       json.object([
         #("type", json.string("requesting_ping")),
-        #("node", encode_node_info(node_info)),
+        #("node", encode_node_info(node_info, option.None)),
       ])
   }
 }
@@ -564,9 +669,9 @@ type SyncResponse {
 
 fn encode_sync_response(res: SyncResponse) -> json.Json {
   json.object([
-    #("self", encode_node_info(res.self)),
-    #("you", encode_node_info(res.you)),
-    #("subset", json.array(res.subset, encode_node_info)),
+    #("self", encode_node_info(res.self, option.None)),
+    #("you", encode_node_info(res.you, option.None)),
+    #("subset", json.array(res.subset, encode_node_info(_, option.None))),
   ])
 }
 
@@ -591,13 +696,11 @@ fn handle_sync_request(
   list.each(subset, fn(node) { process.send(state.subject, Info(node)) })
 
   let you = dict.get(state.nodes, self.id) |> result.unwrap(self)
+  let self = state.self
+  let subset = dict.values(state.nodes) |> list.sample(5)
 
   let response_bytes =
-    SyncResponse(
-      self: state.self,
-      you:,
-      subset: dict.values(state.nodes) |> list.sample(10),
-    )
+    SyncResponse(self:, you:, subset:)
     |> encode_sync_response
     |> json.to_string
     |> bytes_tree.from_string
@@ -619,7 +722,10 @@ fn send_sync_request(
   let assert Ok(base_req) =
     uri.Uri(..api_address, path: "/swim") |> request.from_uri
 
-  let data = Sync(self:, subset:) |> encode_request |> json.to_string
+  let data =
+    Sync(self:, subset:)
+    |> encode_request
+    |> json.to_string
 
   let request =
     base_req
@@ -795,8 +901,6 @@ fn send_request_ping(
     )
     |> result.replace_error(Nil),
   )
-
-  echo request_ping_response
 
   Ok(request_ping_response)
 }
