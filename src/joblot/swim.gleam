@@ -15,6 +15,7 @@ import gleam/order
 import gleam/otp/actor
 import gleam/otp/supervision
 import gleam/result
+import gleam/string
 import gleam/uri
 import httpp/send
 import joblot/util
@@ -47,6 +48,7 @@ pub type Message {
   MarkDead(node_id: String)
   MarkAlive(node_id: String)
   GetClusterView(recv: process.Subject(#(NodeInfo, List(NodeInfo))))
+  GetLocalNode(recv: process.Subject(NodeInfo))
 }
 
 pub type ResponseChannel =
@@ -79,8 +81,8 @@ pub type NodeState {
   Dead
 }
 
-pub fn compare_state(a: NodeInfo, b: NodeInfo) -> order.Order {
-  case a.state, b.state {
+pub fn compare_node(a: NodeInfo, b: NodeInfo) -> order.Order {
+  let state_order = case a.state, b.state {
     Alive, Alive -> order.Eq
     Alive, Suspect -> order.Lt
     Alive, Dead -> order.Lt
@@ -91,6 +93,9 @@ pub fn compare_state(a: NodeInfo, b: NodeInfo) -> order.Order {
     Dead, Suspect -> order.Gt
     Dead, Dead -> order.Eq
   }
+
+  let name_order = string.compare(a.id, b.id)
+  order.break_tie(state_order, name_order)
 }
 
 fn degrade_state(node: NodeInfo) -> NodeInfo {
@@ -210,6 +215,7 @@ fn on_message(state: State, message: Message) -> actor.Next(State, Message) {
     MarkDead(node_id) -> handle_mark_dead(state, node_id)
     MarkAlive(node_id) -> handle_mark_alive(state, node_id)
     GetClusterView(recv) -> get_cluster_view(state, recv)
+    GetLocalNode(recv) -> get_local_node(state, recv)
   }
 }
 
@@ -460,6 +466,14 @@ fn get_cluster_view(
   recv: process.Subject(#(NodeInfo, List(NodeInfo))),
 ) -> actor.Next(State, Message) {
   process.send(recv, #(state.self, dict.values(state.nodes)))
+  actor.continue(state)
+}
+
+fn get_local_node(
+  state: State,
+  recv: process.Subject(NodeInfo),
+) -> actor.Next(State, Message) {
+  process.send(recv, state.self)
   actor.continue(state)
 }
 

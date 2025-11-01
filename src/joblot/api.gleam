@@ -74,10 +74,7 @@ fn handle_swim_cluster_view(
       #("self", swim.encode_node_info(self)),
       #(
         "nodes",
-        json.array(
-          nodes |> list.sort(swim.compare_state),
-          swim.encode_node_info,
-        ),
+        json.array(nodes |> list.sort(swim.compare_node), swim.encode_node_info),
       ),
     ])
 

@@ -33,33 +33,18 @@ case $FLY_REGION in
     REGION="us-east"
     ;;
 
-  lax | sjc)
-    REGION="us-west"
-    ;;
-
-  gru | dfw)
-    REGION="amer-south"
-    ;;
-
-  yyz | ord)
-    REGION="amer-north"
-    ;;
-
   nrt | sin)
     REGION="asia-east"
     ;;
 
-  syd)
-    REGION="pacific"
-    ;;
-
-  bom)
-    REGION="asia-south"
+  *)
+    echo "Unsupported region: $FLY_REGION"
+    exit 1
     ;;
 esac
 
 export REGION=$REGION
-export VALID_REGIONS="eu-west,us-east"
+export VALID_REGIONS="eu-west,us-east,asia-east"
 
 PACKAGE=joblot
 BASE=$(dirname "$0")

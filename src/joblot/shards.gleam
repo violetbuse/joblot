@@ -52,6 +52,7 @@ pub fn create_config(shard_count: Int) -> Config {
   let valid_regions =
     env.get_string_or("VALID_REGIONS", region)
     |> string.split(",")
+    |> list.map(string.trim)
     |> list.filter(fn(str) { string.is_empty(str) |> bool.negate })
     |> list.map(string.lowercase)
 
@@ -66,6 +67,7 @@ pub fn create_config(shard_count: Int) -> Config {
   let bootstrap_addresses =
     env.get_string_or("BOOTSTRAP_NODES", "")
     |> string.split(",")
+    |> list.map(string.trim)
     |> list.filter(fn(str) { string.is_empty(str) |> bool.negate })
     |> list.map(uri.parse)
     |> result.values
