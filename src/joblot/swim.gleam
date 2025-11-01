@@ -521,7 +521,7 @@ fn handle_node_latency(
         option.None ->
           NodeStats(latency: option.Some(latency), prev_latencies: [latency])
         option.Some(NodeStats(prev_latencies:, ..)) -> {
-          let new_prev_latencies = [latency, ..list.take(prev_latencies, 3)]
+          let new_prev_latencies = [latency, ..list.take(prev_latencies, 9)]
 
           let average = {
             list.map(new_prev_latencies, int.to_float)
