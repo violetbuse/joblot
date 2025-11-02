@@ -31,6 +31,9 @@ clockwork = ">= 4.0.0 and < 5.0.0"
 glisten = ">= 8.0.1 and < 9.0.0"
 mug = ">= 3.1.0 and < 4.0.0"
 httpp = ">= 1.7.2 and < 2.0.0"
+filepath = ">= 1.1.2 and < 2.0.0"
+simplifile = ">= 2.3.0 and < 3.0.0"
+file_streams = ">= 1.7.0 and < 2.0.0"
 
 [dev-dependencies]
 gleeunit = ">= 1.0.0 and < 2.0.0"

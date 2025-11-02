@@ -1,3 +1,4 @@
+import filepath
 import gleam/bytes_tree
 import gleam/dict
 import gleam/erlang/process
@@ -12,6 +13,7 @@ import gleam/result
 import joblot/channel
 import joblot/swim
 import mist
+import simplifile
 
 const heartbeat_interval = 5000
 
@@ -20,6 +22,7 @@ pub type PubsubConfig {
     name: process.Name(Message),
     swim: process.Subject(swim.Message),
     cluster_secret: String,
+    data_dir: String,
   )
 }
 
@@ -61,13 +64,20 @@ fn initialize(
 ) -> Result(actor.Initialised(State, Message, Nil), String) {
   let register_channel = process.new_subject()
 
+  let assert Ok(_) = simplifile.create_directory_all(config.data_dir)
+
   let assert Ok(factory_supervisor) =
     factory_supervisor.worker_child(fn(channel_id) {
+      let data_dir = filepath.join(config.data_dir, "/" <> channel_id)
+
+      let assert Ok(_) = simplifile.create_directory_all(data_dir)
+
       let start_result =
         channel.start(channel.ChannelConfig(
           channel_name: channel_id,
           swim: config.swim,
           cluster_secret: config.cluster_secret,
+          data_dir:,
         ))
 
       let _ =

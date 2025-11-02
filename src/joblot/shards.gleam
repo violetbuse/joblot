@@ -1,4 +1,5 @@
 import dot_env/env
+import filepath
 import glanoid
 import gleam/bool
 import gleam/erlang/process
@@ -28,6 +29,7 @@ pub type Config {
     db_pool_size: Int,
     swim_name: process.Name(swim.Message),
     pubsub_name: process.Name(pubsub.Message),
+    pubsub_dir: String,
     shards: List(Shard),
   )
 }
@@ -81,6 +83,9 @@ pub fn create_config(shard_count: Int) -> Config {
   let swim_name = process.new_name("swim")
   let pubsub_name = process.new_name("pubsub")
 
+  let assert Ok(data_dir) = env.get_string("DATA_DIR")
+  let pubsub_dir = filepath.join(data_dir, "/pubsub")
+
   Config(
     listen_address:,
     bind_address:,
@@ -95,6 +100,7 @@ pub fn create_config(shard_count: Int) -> Config {
     db_pool_size:,
     swim_name:,
     pubsub_name:,
+    pubsub_dir:,
     shards: list.range(from: 1, to: shard_count)
       |> list.map(fn(shard_id) { Shard(shard_id:, secret:, region:, db_name:) }),
   )
@@ -142,6 +148,7 @@ fn pubsub_config(config: Config) -> pubsub.PubsubConfig {
     name: config.pubsub_name,
     swim: config.swim_name |> process.named_subject,
     cluster_secret: config.secret,
+    data_dir: config.pubsub_dir,
   )
 }
 
