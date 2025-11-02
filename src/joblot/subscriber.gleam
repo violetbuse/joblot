@@ -156,10 +156,14 @@ fn handle_event(state: State, event: channel.PubsubEvent) -> State {
   )
 
   let already_received = set.insert(state.already_received, event)
+  let latest_event =
+    option.map(state.latest_event, int.max(_, event.sequence_id))
+    |> option.unwrap(event.sequence_id)
+    |> option.Some
 
   process.send(state.sender, Event(event.sequence_id, event.data))
 
-  State(..state, already_received:)
+  State(..state, already_received:, latest_event:)
 }
 
 fn handle_publish(
