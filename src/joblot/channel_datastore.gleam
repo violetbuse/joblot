@@ -2,7 +2,6 @@ import file_streams/file_open_mode
 import file_streams/file_stream
 import file_streams/file_stream_error
 import filepath
-import gleam/bit_array
 import gleam/bool
 import gleam/dict
 import gleam/dynamic/decode
@@ -175,9 +174,8 @@ fn write_events_to_disk(
     |> result.unwrap(0)
 
   let events_to_be_written =
-    list.reverse(events)
-    |> list.take_while(fn(event) { event.time > last_event_time })
-    |> list.reverse
+    list.sort(events, fn(e1, e2) { int.compare(e1.time, e2.time) })
+    |> list.filter(fn(event) { event.time > last_event_time })
 
   let text_to_write =
     events_to_be_written |> list.map(encode_line) |> string.concat
@@ -202,7 +200,7 @@ fn read_events_past(stream: file_stream.FileStream, past: Int) -> List(Event) {
     Ok(line) ->
       case parse_line(line, 0) {
         Error(_) -> panic as "Line could not be parsed"
-        Ok(event) if event.time < past -> read_events_past(stream, past)
+        Ok(event) if event.time <= past -> read_events_past(stream, past)
         Ok(event) -> [event, ..read_events_past(stream, past)]
       }
     Error(file_stream_error.Eof) -> []
