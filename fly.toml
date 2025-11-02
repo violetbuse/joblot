@@ -18,10 +18,10 @@ swap_size_mb = 512
   processes = ['app']
 
 [[http_service.checks]]
-  grace_period = "10s"
+  grace_period = "30s"
   interval = "15s"
   method = "GET"
-  timeout = "1s"
+  timeout = "3s"
   path = "/health"
 
 [[vm]]

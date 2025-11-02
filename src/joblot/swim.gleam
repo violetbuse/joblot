@@ -4,7 +4,6 @@ import gleam/dict
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/float
-import gleam/http
 import gleam/http/request
 import gleam/http/response
 import gleam/int
@@ -20,7 +19,6 @@ import gleam/string
 import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
-import httpp/send
 import joblot/util
 import mist
 
@@ -659,13 +657,13 @@ fn handle_request(
   case json.parse_bits(req.body, decode_request()) {
     Error(_) -> {
       io.println_error("Invalid incoming swim request.")
-      let error =
+      let body =
         json.object([#("error", json.string("Invalid swim request."))])
-      let error_bytes =
-        json.to_string_tree(error) |> bytes_tree.from_string_tree
+        |> json.to_string_tree
+        |> bytes_tree.from_string_tree
+        |> mist.Bytes
 
-      let response =
-        response.new(400) |> response.set_body(mist.Bytes(error_bytes))
+      let response = response.new(400) |> response.set_body(body)
 
       process.send(recv, response)
 
@@ -736,35 +734,24 @@ fn send_sync_request(
   self: NodeInfo,
   subset: List(NodeInfo),
 ) -> Result(SyncResponse, Nil) {
-  let assert Ok(base_req) =
-    uri.Uri(..api_address, path: "/swim") |> request.from_uri
-
   let data =
     Sync(self:, subset:)
     |> encode_request
     |> json.to_string
 
-  let request =
-    base_req
-    |> request.set_method(http.Post)
-    |> request.set_header("authorization", secret)
-    |> request.set_query([#("secret_key", secret)])
-    |> request.set_body(data)
+  let assert option.Some(host) = api_address.host
 
   use response <- result.try(
-    send.send(request)
+    util.send_internal_request(api_address, secret, "/swim", data)
     |> util.log_error(
-      "Error getting result from " <> request.host <> " for sync request",
+      "Error getting result from " <> host <> " for sync request",
     )
     |> result.replace_error(Nil),
   )
   use heartbeat_response <- result.try(
     json.parse(response.body, decode_sync_response())
     |> util.log_error(
-      "Error parsing sync response from "
-      <> request.host
-      <> ": "
-      <> response.body,
+      "Error parsing sync response from " <> host <> ": " <> response.body,
     )
     |> result.replace_error(Nil),
   )
@@ -811,32 +798,19 @@ fn handle_ping(
 }
 
 fn send_ping(api_address: uri.Uri, secret: String) -> Result(PingResponse, Nil) {
-  let assert Ok(base_req) =
-    uri.Uri(..api_address, path: "/swim") |> request.from_uri
-
   let data = Ping |> encode_request |> json.to_string
 
-  let request =
-    base_req
-    |> request.set_method(http.Post)
-    |> request.set_header("authorization", secret)
-    |> request.set_query([#("secret_key", secret)])
-    |> request.set_body(data)
+  let assert option.Some(host) = api_address.host
 
   use response <- result.try(
-    send.send(request)
-    |> util.log_error(
-      "Error fetching http from " <> request.host <> " for ping",
-    )
+    util.send_internal_request(api_address, secret, "/swim", data)
+    |> util.log_error("Error fetching http from " <> host <> " for ping")
     |> result.replace_error(Nil),
   )
   use ping_response <- result.try(
     json.parse(response.body, decode_ping_response())
     |> util.log_error(
-      "Error parsing ping response from "
-      <> request.host
-      <> ": "
-      <> response.body,
+      "Error parsing ping response from " <> host <> ": " <> response.body,
     )
     |> result.replace_error(Nil),
   )
@@ -892,29 +866,19 @@ fn send_request_ping(
   secret: String,
   to_ping: NodeInfo,
 ) -> Result(RequestPingResponse, Nil) {
-  let assert Ok(base_req) =
-    uri.Uri(..api_address, path: "/swim") |> request.from_uri
-
   let data = RequestPing(to_ping) |> encode_request |> json.to_string
 
-  let request =
-    base_req
-    |> request.set_method(http.Post)
-    |> request.set_header("authorization", secret)
-    |> request.set_query([#("secret_key", secret)])
-    |> request.set_body(data)
+  let assert option.Some(host) = api_address.host
 
   use response <- result.try(
-    send.send(request)
-    |> util.log_error(
-      "Error http fetch from " <> request.host <> " for request ping",
-    )
+    util.send_internal_request(api_address, secret, "/swim", data)
+    |> util.log_error("Error http fetch from " <> host <> " for request ping")
     |> result.replace_error(Nil),
   )
   use request_ping_response <- result.try(
     json.parse(response.body, decode_request_ping_response())
     |> util.log_error(
-      "Error parsing response from " <> request.host <> ": " <> response.body,
+      "Error parsing response from " <> host <> ": " <> response.body,
     )
     |> result.replace_error(Nil),
   )

@@ -2,7 +2,6 @@ import dot_env/env
 import glanoid
 import gleam/bool
 import gleam/erlang/process
-import gleam/io
 import gleam/list
 import gleam/option
 import gleam/otp/static_supervisor
@@ -10,6 +9,7 @@ import gleam/result
 import gleam/string
 import gleam/uri
 import joblot/api
+import joblot/pubsub
 import joblot/swim
 import pog
 
@@ -27,6 +27,7 @@ pub type Config {
     db_url: String,
     db_pool_size: Int,
     swim_name: process.Name(swim.Message),
+    pubsub_name: process.Name(pubsub.Message),
     shards: List(Shard),
   )
 }
@@ -72,14 +73,13 @@ pub fn create_config(shard_count: Int) -> Config {
     |> list.map(uri.parse)
     |> result.values
 
-  list.map(bootstrap_addresses, uri.to_string) |> list.each(io.println)
-
   let server_id = env.get_string_or("SERVER_ID", nanoid(21))
   let assert Ok(db_url) = env.get_string("DATABASE_URL")
   let db_pool_size = env.get_int_or("POOL_SIZE", 10)
   let db_name = process.new_name("db_pool")
 
   let swim_name = process.new_name("swim")
+  let pubsub_name = process.new_name("pubsub")
 
   Config(
     listen_address:,
@@ -94,6 +94,7 @@ pub fn create_config(shard_count: Int) -> Config {
     db_url:,
     db_pool_size:,
     swim_name:,
+    pubsub_name:,
     shards: list.range(from: 1, to: shard_count)
       |> list.map(fn(shard_id) { Shard(shard_id:, secret:, region:, db_name:) }),
   )
@@ -129,9 +130,18 @@ fn api_config(config: Config) -> api.ApiConfig {
   api.ApiConfig(
     port: config.port,
     swim: config.swim_name |> process.named_subject,
+    pubsub: config.pubsub_name |> process.named_subject,
     db_name: config.db_name,
     secret: config.secret,
     bind_address: config.bind_address,
+  )
+}
+
+fn pubsub_config(config: Config) -> pubsub.PubsubConfig {
+  pubsub.PubsubConfig(
+    name: config.pubsub_name,
+    swim: config.swim_name |> process.named_subject,
+    cluster_secret: config.secret,
   )
 }
 
@@ -144,6 +154,7 @@ pub fn start_program(config: Config) {
     static_supervisor.new(static_supervisor.OneForOne)
     |> static_supervisor.add(db_pool_supervised)
     |> static_supervisor.add(swim_config(config) |> swim.supervised)
+    |> static_supervisor.add(pubsub_config(config) |> pubsub.supervised)
     |> static_supervisor.add(api_config(config) |> api.supervised)
     |> multiple_shards(config.shards)
     |> static_supervisor.start
