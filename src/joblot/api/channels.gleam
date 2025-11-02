@@ -1,5 +1,6 @@
 import gleam/bit_array
 import gleam/bool
+import gleam/bytes_tree
 import gleam/dict
 import gleam/erlang/process
 import gleam/float
@@ -35,7 +36,40 @@ pub fn api_handler(
   case request.path_segments(req) {
     ["api", "channels", channel_name, "socket"] ->
       handle_websocket_incoming(req, channel_name, pubsub)
+    ["api", "channels", channel_name, "publish"] ->
+      handle_publish(req, channel_name, pubsub)
     _ -> util.not_found()
+  }
+}
+
+const mb_128 = 134_217_728
+
+fn handle_publish(
+  req: request.Request(mist.Connection),
+  channel_name: String,
+  pubsub: process.Subject(pubsub.Message),
+) -> response.Response(mist.ResponseData) {
+  let assert Ok(req) = mist.read_body(req, mb_128)
+  case bit_array.to_string(req.body) {
+    Ok(text) -> {
+      let body =
+        pubsub.publish(pubsub, channel_name, text)
+        |> channel.encode_pubsub_event
+        |> json.to_string_tree
+        |> bytes_tree.from_string_tree
+        |> mist.Bytes
+
+      response.new(200) |> response.set_body(body)
+    }
+    Error(_) -> {
+      let body =
+        json.object([#("error", json.string("Event was invalid utf-8 text"))])
+        |> json.to_string_tree
+        |> bytes_tree.from_string_tree
+        |> mist.Bytes
+
+      response.new(400) |> response.set_body(body)
+    }
   }
 }
 

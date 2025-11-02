@@ -155,6 +155,18 @@ fn handle_health_check() -> response.Response(mist.ResponseData) {
   response.new(200) |> response.set_body(data)
 }
 
+fn handle_api_routes(
+  req: request.Request(mist.Connection),
+  context: Context,
+) -> response.Response(mist.ResponseData) {
+  use req, context <- use_protected(req, context)
+
+  case request.path_segments(req) {
+    ["api", "channels", ..] -> channels.api_handler(req, context.pubsub)
+    _ -> util.not_found()
+  }
+}
+
 fn handle_request(
   req: request.Request(mist.Connection),
   context: Context,
@@ -164,7 +176,7 @@ fn handle_request(
     ["swim", ..] -> handle_swim(req, context)
     ["pubsub", ..] -> handle_pubsub(req, context)
     ["health"] -> handle_health_check()
-    ["api", "channels", ..] -> channels.api_handler(req, context.pubsub)
+    ["api", ..] -> handle_api_routes(req, context)
     _ -> util.not_found()
   }
 }
