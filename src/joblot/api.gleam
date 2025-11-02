@@ -7,8 +7,10 @@ import gleam/json
 import gleam/list
 import gleam/option
 import gleam/result
+import joblot/api/channels
 import joblot/pubsub
 import joblot/swim
+import joblot/util
 import mist
 import pog
 
@@ -32,28 +34,6 @@ type Context {
   )
 }
 
-fn not_found() {
-  let data =
-    json.object([#("error", json.string("Not Found"))])
-    |> json.to_string_tree
-    |> bytes_tree.from_string_tree
-    |> mist.Bytes
-
-  response.new(404)
-  |> response.set_body(data)
-}
-
-fn not_authorized() {
-  let data =
-    json.object([#("error", json.string("Not Authorized."))])
-    |> json.to_string_tree
-    |> bytes_tree.from_string_tree
-    |> mist.Bytes
-
-  response.new(403)
-  |> response.set_body(data)
-}
-
 fn use_protected(
   req: request.Request(mist.Connection),
   context: Context,
@@ -68,7 +48,10 @@ fn use_protected(
 
   let secret = result.or(secret_header, secret_param) |> result.unwrap("")
 
-  use <- bool.guard(when: secret != context.secret, return: not_authorized())
+  use <- bool.guard(
+    when: secret != context.secret,
+    return: util.not_authorized(),
+  )
 
   callback(req, context)
 }
@@ -181,7 +164,8 @@ fn handle_request(
     ["swim", ..] -> handle_swim(req, context)
     ["pubsub", ..] -> handle_pubsub(req, context)
     ["health"] -> handle_health_check()
-    _ -> not_found()
+    ["api", "channels", ..] -> channels.api_handler(req, context.pubsub)
+    _ -> util.not_found()
   }
 }
 

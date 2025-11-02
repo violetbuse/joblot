@@ -219,9 +219,18 @@ pub fn publish(
 pub fn subscribe(
   pubsub: process.Subject(Message),
   channel name: String,
-  receive to: process.Subject(String),
+  receive to: process.Subject(channel.PubsubEvent),
   replay from: option.Option(Int),
 ) {
   process.call(pubsub, 1000, GetChannel(name, _))
   |> process.send(channel.Subscribe(to, from))
+}
+
+pub fn unsubscribe(
+  pubsub: process.Subject(Message),
+  channel name: String,
+  receiver recv: process.Subject(channel.PubsubEvent),
+) {
+  process.call(pubsub, 1000, GetChannel(name, _))
+  |> process.send(channel.Unsubscribe(recv))
 }

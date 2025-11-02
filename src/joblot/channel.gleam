@@ -13,6 +13,7 @@ import gleam/list
 import gleam/option
 import gleam/otp/actor
 import gleam/result
+import gleam/set
 import gleam/time/timestamp
 import gleam/uri
 import joblot/swim
@@ -34,8 +35,12 @@ pub type Message {
   HandleRequest(req: request.Request(mist.Connection), recv: ResponseChannel)
   AnnouncedSequences(sequences: dict.Dict(String, Int), from: String)
   NewEvents(node: String, events: List(PubsubEvent))
-  PublishEvent(String, recv: process.Subject(Bool))
-  Subscribe(receiver: process.Subject(String), replay_from: option.Option(Int))
+  PublishEvent(String, recv: process.Subject(PubsubEvent))
+  Subscribe(
+    receiver: process.Subject(PubsubEvent),
+    replay_from: option.Option(Int),
+  )
+  Unsubscribe(receiver: process.Subject(PubsubEvent))
 }
 
 pub type ResponseChannel =
@@ -47,7 +52,7 @@ type State {
     subject: process.Subject(Message),
     swim: process.Subject(swim.Message),
     event_buckets: dict.Dict(String, List(PubsubEvent)),
-    subscribers: List(process.Subject(String)),
+    subscribers: set.Set(process.Subject(PubsubEvent)),
     cluster_secret: String,
   )
 }
@@ -56,7 +61,7 @@ pub type PubsubEvent {
   PubsubEvent(sequence_id: Int, data: String)
 }
 
-fn encode_pubsub_event(event: PubsubEvent) -> json.Json {
+pub fn encode_pubsub_event(event: PubsubEvent) -> json.Json {
   json.object([
     #("sequence_id", json.int(event.sequence_id)),
     #("data", json.string(event.data)),
@@ -83,7 +88,7 @@ fn initialize(
       swim: config.swim,
       event_buckets: dict.new(),
       cluster_secret: config.cluster_secret,
-      subscribers: [],
+      subscribers: set.new(),
     )
 
   actor.initialised(state)
@@ -101,6 +106,7 @@ fn on_message(state: State, message: Message) -> actor.Next(State, Message) {
     PublishEvent(event, recv) -> handle_publish_event(state, event, recv)
     Subscribe(receiver:, replay_from:) ->
       handle_subscribe(state, receiver, replay_from)
+    Unsubscribe(receiver:) -> handle_unsubscribe(state, receiver)
   }
 }
 
@@ -191,9 +197,7 @@ fn handle_announced_sequences(
 
 fn util_disseminate_new_events(events: List(PubsubEvent), state: State) {
   list.reverse(events)
-  |> list.each(fn(event) {
-    list.each(state.subscribers, process.send(_, event.data))
-  })
+  |> list.each(fn(event) { set.each(state.subscribers, process.send(_, event)) })
 }
 
 fn handle_new_events(
@@ -227,7 +231,7 @@ fn handle_new_events(
 fn handle_publish_event(
   state: State,
   event: String,
-  recv: process.Subject(Bool),
+  recv: process.Subject(PubsubEvent),
 ) -> actor.Next(State, Message) {
   let #(self_node, other_nodes) =
     process.call(state.swim, 1000, swim.GetClusterView)
@@ -252,6 +256,8 @@ fn handle_publish_event(
       }
     })
 
+  set.each(state.subscribers, process.send(_, pubsub_event))
+
   process.spawn(fn() {
     list.filter(other_nodes, swim.is_alive)
     |> list.each(fn(target) {
@@ -267,14 +273,14 @@ fn handle_publish_event(
     })
   })
 
-  process.send(recv, True)
+  process.send(recv, pubsub_event)
 
   actor.continue(State(..state, event_buckets: new_buckets))
 }
 
 fn handle_subscribe(
   state: State,
-  receiver: process.Subject(String),
+  receiver: process.Subject(PubsubEvent),
   replay_from: option.Option(Int),
 ) {
   case replay_from {
@@ -284,11 +290,16 @@ fn handle_subscribe(
       |> list.interleave
       |> list.filter(fn(event) { event.sequence_id >= replay_from })
       |> list.sort(fn(a, b) { int.compare(a.sequence_id, b.sequence_id) })
-      |> list.each(fn(event) { process.send(receiver, event.data) })
+      |> list.each(process.send(receiver, _))
     }
   }
 
-  let subscribers = [receiver, ..state.subscribers]
+  let subscribers = set.insert(state.subscribers, receiver)
+  actor.continue(State(..state, subscribers:))
+}
+
+fn handle_unsubscribe(state: State, receiver: process.Subject(PubsubEvent)) {
+  let subscribers = set.delete(state.subscribers, receiver)
   actor.continue(State(..state, subscribers:))
 }
 
