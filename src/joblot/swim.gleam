@@ -22,7 +22,7 @@ import gleam/uri
 import joblot/util
 import mist
 
-const heartbeat_interval = 15_000
+const heartbeat_interval = 3000
 
 pub type SwimConfig {
   SwimConfig(
