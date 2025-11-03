@@ -1,7 +1,9 @@
 import gleam/bit_array
+import gleam/bool
 import gleam/bytes_tree
 import gleam/dict
 import gleam/erlang/process
+import gleam/float
 import gleam/http/request
 import gleam/http/response
 import gleam/int
@@ -9,6 +11,7 @@ import gleam/json
 import gleam/option
 import gleam/otp/actor
 import gleam/result
+import gleam/time/timestamp
 import joblot/event_store.{type Event}
 import joblot/pubsub
 import joblot/subscriber
@@ -26,6 +29,19 @@ pub fn api_handler(
       handle_sse_incoming(req, channel_name, pubsub)
     ["api", "channels", channel_name, "publish"] ->
       handle_publish(req, channel_name, pubsub)
+    ["api", "channels", channel_name, "range", from, to] ->
+      handle_range(req, channel_name, from, to, pubsub)
+    ["api", "channels", channel_name, "from", from] ->
+      handle_range(
+        req,
+        channel_name,
+        from,
+        timestamp.system_time()
+          |> timestamp.to_unix_seconds
+          |> float.round
+          |> int.to_string,
+        pubsub,
+      )
     _ -> util.not_found()
   }
 }
@@ -59,6 +75,66 @@ fn handle_publish(
       response.new(400) |> response.set_body(body)
     }
   }
+}
+
+fn invalid_int(
+  name: String,
+  int: String,
+) -> response.Response(mist.ResponseData) {
+  let message = int <> " is not a valid value for " <> name
+  let body =
+    json.object([#("error", json.string(message))])
+    |> json.to_string_tree
+    |> bytes_tree.from_string_tree
+    |> mist.Bytes
+
+  response.new(400) |> response.set_body(body)
+}
+
+fn wrong_order() -> response.Response(mist.ResponseData) {
+  let body =
+    json.object([#("error", json.string("invalid range timeframe"))])
+    |> json.to_string_tree
+    |> bytes_tree.from_string_tree
+    |> mist.Bytes
+
+  response.new(400) |> response.set_body(body)
+}
+
+fn handle_range(
+  _req: request.Request(mist.Connection),
+  channel_name: String,
+  from: String,
+  to: String,
+  pubsub: process.Subject(pubsub.Message),
+) -> response.Response(mist.ResponseData) {
+  let from_parsed = int.parse(from)
+  let to_parsed = int.parse(to)
+
+  use <- bool.guard(
+    when: result.is_error(from_parsed),
+    return: invalid_int("from", from),
+  )
+  use <- bool.guard(
+    when: result.is_error(to_parsed),
+    return: invalid_int("to", to),
+  )
+
+  let assert Ok(from) = from_parsed
+  let assert Ok(to) = to_parsed
+
+  use <- bool.guard(when: from > to, return: wrong_order())
+  use <- bool.guard(when: from < 0, return: wrong_order())
+
+  let events = pubsub.range(pubsub, channel_name, from, to)
+
+  let body =
+    json.array(events, event_store.encode_event)
+    |> json.to_string_tree
+    |> bytes_tree.from_string_tree
+    |> mist.Bytes
+
+  response.new(200) |> response.set_body(body)
 }
 
 type ChannelSocketState {

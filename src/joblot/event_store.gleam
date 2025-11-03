@@ -35,6 +35,7 @@ pub opaque type Message {
   Close
   GetLatest(recv: process.Subject(Result(Event, Nil)))
   GetFrom(from: Int, recv: process.Subject(List(Event)))
+  GetBetween(from: Int, to: Int, recv: process.Subject(List(Event)))
   Write(events: List(Event), recv: process.Subject(List(Event)))
 }
 
@@ -96,6 +97,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
     Close -> handle_close(state)
     GetFrom(from:, recv:) -> handle_get_from(state, from, recv)
     GetLatest(recv:) -> handle_get_latest(state, recv)
+    GetBetween(from:, to:, recv:) -> handle_get_between(state, from, to, recv)
     Write(events:, recv:) -> handle_write(state, events, recv)
   }
 }
@@ -156,6 +158,42 @@ fn handle_get_from(
         sql,
         on: state.db,
         with: [sqlight.int(from)],
+        expecting: decoder,
+      )
+
+    list
+  }
+
+  process.send(recv, result_set)
+
+  actor.continue(state)
+}
+
+fn handle_get_between(
+  state: State,
+  from: Int,
+  to: Int,
+  recv: process.Subject(List(Event)),
+) -> actor.Next(State, Message) {
+  let result_set = {
+    let decoder = {
+      use time <- decode.field(0, decode.int)
+      use data <- decode.field(1, decode.string)
+      decode.success(Event(time:, data:))
+    }
+
+    let sql =
+      "
+    SELECT time, data FROM events
+    WHERE time > ? AND time <= ?
+    ORDER BY time ASC;
+    "
+
+    let assert Ok(list) =
+      sqlight.query(
+        sql,
+        on: state.db,
+        with: [sqlight.int(from), sqlight.int(to)],
         expecting: decoder,
       )
 
@@ -278,6 +316,10 @@ pub fn get_latest(store: EventStore) {
 
 pub fn get_from(store: EventStore, from: Int) {
   process.call(store.subject, 1000, GetFrom(from, _))
+}
+
+pub fn get_range(store: EventStore, from: Int, to: Int) {
+  process.call(store.subject, 1000, GetBetween(from, to, _))
 }
 
 pub fn write(store: EventStore, events: List(Event)) {

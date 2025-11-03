@@ -39,6 +39,7 @@ pub type Message {
   AnnouncedSequences(sequences: dict.Dict(String, Int), from: String)
   NewEvents(node: String, events: List(Event))
   PublishEvent(String, recv: process.Subject(Event))
+  GetEventRange(from: Int, to: Int, recv: process.Subject(List(Event)))
   Subscribe(receiver: process.Subject(Event), replay_from: option.Option(Int))
   Unsubscribe(receiver: process.Subject(Event))
 }
@@ -113,6 +114,7 @@ fn on_message(state: State, message: Message) -> actor.Next(State, Message) {
       handle_announced_sequences(state, sequences, from)
     NewEvents(node:, events:) -> handle_new_events(state, node, events)
     PublishEvent(event, recv) -> handle_publish_event(state, event, recv)
+    GetEventRange(from:, to:, recv:) -> handle_get_range(state, from, to, recv)
     Subscribe(receiver:, replay_from:) ->
       handle_subscribe(state, receiver, replay_from)
     Unsubscribe(receiver:) -> handle_unsubscribe(state, receiver)
@@ -345,11 +347,28 @@ fn handle_publish_event(
   actor.continue(state)
 }
 
+fn handle_get_range(
+  state: State,
+  from: Int,
+  to: Int,
+  recv: process.Subject(List(Event)),
+) -> actor.Next(State, Message) {
+  let events =
+    dict.values(state.store)
+    |> list.map(event_store.get_range(_, from, to))
+    |> list.interleave
+    |> list.sort(fn(e1, e2) { int.compare(e1.time, e2.time) })
+
+  process.send(recv, events)
+
+  actor.continue(state)
+}
+
 fn handle_subscribe(
   state: State,
   receiver: process.Subject(Event),
   replay_from: option.Option(Int),
-) {
+) -> actor.Next(State, Message) {
   // case replay_from {
   //   option.None -> Nil
   //   option.Some(replay_from) -> {

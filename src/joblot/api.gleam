@@ -171,7 +171,7 @@ fn handle_request(
   req: request.Request(mist.Connection),
   context: Context,
 ) -> response.Response(mist.ResponseData) {
-  case request.path_segments(req) {
+  let response = case request.path_segments(req) {
     ["cluster"] -> handle_swim_cluster_view(req, context)
     ["swim", ..] -> handle_swim(req, context)
     ["pubsub", ..] -> handle_pubsub(req, context)
@@ -179,6 +179,8 @@ fn handle_request(
     ["api", ..] -> handle_api_routes(req, context)
     _ -> util.not_found()
   }
+
+  response |> response.set_header("Content-type", "application/json")
 }
 
 pub fn supervised(config: ApiConfig) {

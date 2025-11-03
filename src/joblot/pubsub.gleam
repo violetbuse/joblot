@@ -227,6 +227,16 @@ pub fn publish(
   |> process.call(1000, channel.PublishEvent(data, _))
 }
 
+pub fn range(
+  pubsub: process.Subject(Message),
+  channel name: String,
+  from from: Int,
+  until to: Int,
+) {
+  process.call(pubsub, 1000, GetChannel(name, _))
+  |> process.call(1000, channel.GetEventRange(from, to, _))
+}
+
 pub fn subscribe(
   pubsub: process.Subject(Message),
   channel name: String,
