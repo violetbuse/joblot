@@ -7,6 +7,7 @@ import gleam/http/response
 import gleam/int
 import gleam/json
 import gleam/option
+import gleam/otp/actor
 import gleam/result
 import joblot/event_store.{type Event}
 import joblot/pubsub
@@ -21,6 +22,8 @@ pub fn api_handler(
   case request.path_segments(req) {
     ["api", "channels", channel_name, "socket"] ->
       handle_websocket_incoming(req, channel_name, pubsub)
+    ["api", "channels", channel_name, "events"] ->
+      handle_sse_incoming(req, channel_name, pubsub)
     ["api", "channels", channel_name, "publish"] ->
       handle_publish(req, channel_name, pubsub)
     _ -> util.not_found()
@@ -58,6 +61,14 @@ fn handle_publish(
   }
 }
 
+type ChannelSocketState {
+  State(subscriber: subscriber.Subscriber)
+}
+
+type ChannelSocketMessage {
+  IncomingEvent(Event)
+}
+
 fn handle_websocket_incoming(
   req: request.Request(mist.Connection),
   channel_name: String,
@@ -78,14 +89,6 @@ fn handle_websocket_incoming(
     channel_websocket_initializer(_, req, pubsub, channel_name, replay_from),
     channel_websocket_on_close,
   )
-}
-
-type ChannelSocketState {
-  State(subscriber: subscriber.Subscriber)
-}
-
-type ChannelSocketMessage {
-  IncomingEvent(Event)
 }
 
 fn channel_websocket_initializer(
@@ -163,10 +166,7 @@ fn channel_websocket_handle_incoming_event(
   conn: mist.WebsocketConnection,
 ) -> mist.Next(ChannelSocketState, ChannelSocketMessage) {
   let data =
-    json.object([
-      #("time", json.int(event.time)),
-      #("message", json.string(event.data)),
-    ])
+    event_store.encode_event(event)
     |> json.to_string
 
   case mist.send_text_frame(conn, data) {
@@ -178,4 +178,80 @@ fn channel_websocket_handle_incoming_event(
 
 fn channel_websocket_on_close(state: ChannelSocketState) -> Nil {
   subscriber.unsubscribe(state.subscriber)
+}
+
+fn handle_sse_incoming(
+  req: request.Request(mist.Connection),
+  channel_name: String,
+  pubsub: process.Subject(pubsub.Message),
+) -> response.Response(mist.ResponseData) {
+  let replay_from =
+    request.get_query(req)
+    |> result.map(dict.from_list)
+    |> result.unwrap(dict.new())
+    |> dict.get("replay_from")
+    |> result.map(int.parse)
+    |> result.flatten
+    |> option.from_result
+
+  let initial_response = response.new(200)
+
+  mist.server_sent_events(
+    req,
+    initial_response:,
+    init: channel_sse_initializer(_, pubsub, channel_name, replay_from),
+    loop: channel_sse_loop,
+  )
+}
+
+fn channel_sse_initializer(
+  _subject: process.Subject(ChannelSocketMessage),
+  pubsub: process.Subject(pubsub.Message),
+  channel_name: String,
+  replay_from: option.Option(Int),
+) -> Result(
+  actor.Initialised(ChannelSocketState, ChannelSocketMessage, Nil),
+  String,
+) {
+  let receiver = process.new_subject()
+
+  use subscriber <- result.try(
+    subscriber.new(pubsub, channel_name, replay_from, receiver)
+    |> result.replace_error(
+      "Could not start subscriber for channel: " <> channel_name,
+    ),
+  )
+
+  let state = State(subscriber:)
+
+  let selector =
+    process.new_selector()
+    |> process.select_map(receiver, IncomingEvent)
+
+  actor.initialised(state)
+  |> actor.selecting(selector)
+  |> actor.returning(Nil)
+  |> Ok
+}
+
+fn channel_sse_loop(
+  state: ChannelSocketState,
+  message: ChannelSocketMessage,
+  connection: mist.SSEConnection,
+) -> actor.Next(ChannelSocketState, ChannelSocketMessage) {
+  case message {
+    IncomingEvent(event) -> {
+      let sse_event =
+        event
+        |> event_store.encode_event
+        |> json.to_string_tree
+        |> mist.event
+        |> mist.event_name("event")
+        |> mist.event_id(int.to_string(event.time))
+
+      let assert Ok(_) = mist.send_event(connection, sse_event)
+
+      actor.continue(state)
+    }
+  }
 }
