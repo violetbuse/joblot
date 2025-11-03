@@ -8,6 +8,7 @@ import gleam/order
 import gleam/set
 import gleam/time/timestamp
 import joblot/channel
+import joblot/event_store.{type Event}
 import joblot/pubsub
 
 pub opaque type Subscriber {
@@ -16,14 +17,10 @@ pub opaque type Subscriber {
 
 pub opaque type Message {
   Unsubscribe
-  IncomingEvent(channel.PubsubEvent)
+  IncomingEvent(Event)
   Vacuum
   Heartbeat
   Publish(data: String, recv: process.Subject(Event))
-}
-
-pub type Event {
-  Event(time: Int, data: String)
 }
 
 type State {
@@ -32,11 +29,11 @@ type State {
     channel_name: String,
     latest_event: option.Option(Int),
     self: process.Subject(Message),
-    receiver: process.Subject(channel.PubsubEvent),
+    receiver: process.Subject(Event),
     selector: process.Selector(Message),
     sender: process.Subject(Event),
     owning_process: process.Pid,
-    already_received: set.Set(channel.PubsubEvent),
+    already_received: set.Set(Event),
   )
 }
 
@@ -130,16 +127,14 @@ fn handle_vacuum(state: State) -> State {
 
   let already_received = {
     let filtered =
-      set.filter(state.already_received, fn(event) {
-        now - event.sequence_id > 3600
-      })
+      set.filter(state.already_received, fn(event) { now - event.time > 3600 })
 
     case set.size(filtered) > 5000 {
       False -> filtered
       True ->
         set.to_list(filtered)
         |> list.sort(fn(e1, e2) {
-          int.compare(e1.sequence_id, e2.sequence_id) |> order.negate
+          int.compare(e1.time, e2.time) |> order.negate
         })
         |> list.take(1000)
         |> set.from_list
@@ -149,7 +144,7 @@ fn handle_vacuum(state: State) -> State {
   State(..state, already_received:)
 }
 
-fn handle_event(state: State, event: channel.PubsubEvent) -> State {
+fn handle_event(state: State, event: Event) -> State {
   use <- bool.guard(
     when: set.contains(state.already_received, event),
     return: state,
@@ -157,11 +152,11 @@ fn handle_event(state: State, event: channel.PubsubEvent) -> State {
 
   let already_received = set.insert(state.already_received, event)
   let latest_event =
-    option.map(state.latest_event, int.max(_, event.sequence_id))
-    |> option.unwrap(event.sequence_id)
+    option.map(state.latest_event, int.max(_, event.time))
+    |> option.unwrap(event.time)
     |> option.Some
 
-  process.send(state.sender, Event(event.sequence_id, event.data))
+  process.send(state.sender, event)
 
   State(..state, already_received:, latest_event:)
 }
@@ -177,7 +172,7 @@ fn handle_publish(
 
   let already_received = set.insert(state.already_received, new_event)
 
-  process.send(recv, Event(new_event.sequence_id, new_event.data))
+  process.send(recv, new_event)
 
   State(..state, already_received:)
 }

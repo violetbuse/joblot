@@ -1,3 +1,4 @@
+import filepath
 import gleam/bytes_tree
 import gleam/dict
 import gleam/dynamic/decode
@@ -16,7 +17,7 @@ import gleam/result
 import gleam/set
 import gleam/time/timestamp
 import gleam/uri
-import joblot/channel_datastore
+import joblot/event_store.{type Event, type EventStore}
 import joblot/swim
 import joblot/util
 import mist
@@ -36,13 +37,10 @@ pub type Message {
   Heartbeat
   HandleRequest(req: request.Request(mist.Connection), recv: ResponseChannel)
   AnnouncedSequences(sequences: dict.Dict(String, Int), from: String)
-  NewEvents(node: String, events: List(PubsubEvent))
-  PublishEvent(String, recv: process.Subject(PubsubEvent))
-  Subscribe(
-    receiver: process.Subject(PubsubEvent),
-    replay_from: option.Option(Int),
-  )
-  Unsubscribe(receiver: process.Subject(PubsubEvent))
+  NewEvents(node: String, events: List(Event))
+  PublishEvent(String, recv: process.Subject(Event))
+  Subscribe(receiver: process.Subject(Event), replay_from: option.Option(Int))
+  Unsubscribe(receiver: process.Subject(Event))
 }
 
 pub type ResponseChannel =
@@ -53,39 +51,36 @@ type State {
     channel_name: String,
     subject: process.Subject(Message),
     swim: process.Subject(swim.Message),
-    datastore: channel_datastore.ChannelDatastore,
-    subscribers: set.Set(process.Subject(PubsubEvent)),
+    store: dict.Dict(String, EventStore),
+    subscribers: set.Set(process.Subject(Event)),
     cluster_secret: String,
+    data_dir: String,
   )
 }
 
-pub type PubsubEvent {
-  PubsubEvent(sequence_id: Int, data: String)
-}
+fn ensure_store(state: State, node_id: String) -> #(EventStore, State) {
+  let new_dict =
+    dict.upsert(state.store, node_id, fn(existing) {
+      case existing {
+        option.None ->
+          case
+            event_store.start(filepath.join(
+              state.data_dir,
+              node_id <> ".events.db",
+            ))
+          {
+            Ok(store) -> store
+            Error(err) -> {
+              echo err
+              panic as "Error starting event store"
+            }
+          }
+        option.Some(store) -> store
+      }
+    })
 
-fn pubsub_event_from_event(event: channel_datastore.Event) -> PubsubEvent {
-  PubsubEvent(sequence_id: event.time, data: event.data)
-}
-
-fn event_from_pubsub_event(pubsub_event: PubsubEvent) -> channel_datastore.Event {
-  channel_datastore.Event(
-    time: pubsub_event.sequence_id,
-    data: pubsub_event.data,
-  )
-}
-
-pub fn encode_pubsub_event(event: PubsubEvent) -> json.Json {
-  json.object([
-    #("sequence_id", json.int(event.sequence_id)),
-    #("data", json.string(event.data)),
-  ])
-}
-
-fn decode_pubsub_event() -> decode.Decoder(PubsubEvent) {
-  use sequence_id <- decode.field("sequence_id", decode.int)
-  use data <- decode.field("data", decode.string)
-
-  decode.success(PubsubEvent(sequence_id:, data:))
+  let assert Ok(store) = dict.get(new_dict, node_id)
+  #(store, State(..state, store: new_dict))
 }
 
 fn initialize(
@@ -94,19 +89,15 @@ fn initialize(
 ) -> Result(actor.Initialised(State, Message, process.Subject(Message)), String) {
   process.send(self, Heartbeat)
 
-  let assert Ok(datastore) =
-    channel_datastore.start(channel_datastore.ChannelDatastoreConfig(
-      config.data_dir,
-    ))
-
   let state =
     State(
       channel_name: config.channel_name,
       subject: self,
       swim: config.swim,
-      datastore: datastore,
+      store: dict.new(),
       cluster_secret: config.cluster_secret,
       subscribers: set.new(),
+      data_dir: config.data_dir,
     )
 
   actor.initialised(state)
@@ -153,15 +144,25 @@ fn announce_sequences(state: State) {
         //   |> list.sample(3)
         //   |> dict.from_list
 
+        // let sequences =
+        //   channel_datastore.get_buckets(state.datastore)
+        //   |> list.map(fn(node_id) {
+        //     case channel_datastore.get_latest_event(state.datastore, node_id) {
+        //       option.None -> Error(Nil)
+        //       option.Some(event) -> Ok(#(node_id, event.time))
+        //     }
+        //   })
+        //   |> result.values
+        //   |> list.sample(3)
+        //   |> dict.from_list
+
         let sequences =
-          channel_datastore.get_buckets(state.datastore)
-          |> list.map(fn(node_id) {
-            case channel_datastore.get_latest_event(state.datastore, node_id) {
-              option.None -> Error(Nil)
-              option.Some(event) -> Ok(#(node_id, event.time))
-            }
+          dict.map_values(state.store, fn(_, store) {
+            event_store.get_latest(store)
+            |> result.map(fn(event) { event.time })
+            |> result.unwrap(0)
           })
-          |> result.values
+          |> dict.to_list
           |> list.sample(3)
           |> dict.from_list
 
@@ -191,10 +192,17 @@ fn handle_announced_sequences(
       //   |> result.map(fn(event) { event.sequence_id })
       //   |> result.unwrap(0)
 
+      // let existing_sequence =
+      //   channel_datastore.get_latest_event(state.datastore, sequence_node_id)
+      //   |> option.map(fn(event) { event.time })
+      //   |> option.unwrap(0)
+
       let existing_sequence =
-        channel_datastore.get_latest_event(state.datastore, sequence_node_id)
-        |> option.map(fn(event) { event.time })
-        |> option.unwrap(0)
+        dict.get(state.store, sequence_node_id)
+        |> result.map(event_store.get_latest)
+        |> result.flatten
+        |> result.map(fn(event) { event.time })
+        |> result.unwrap(0)
 
       let available_new_messages = new_sequence > existing_sequence
 
@@ -230,7 +238,7 @@ fn handle_announced_sequences(
   actor.continue(state)
 }
 
-fn util_disseminate_new_events(events: List(PubsubEvent), state: State) {
+fn util_disseminate_new_events(events: List(Event), state: State) {
   list.reverse(events)
   |> list.each(fn(event) { set.each(state.subscribers, process.send(_, event)) })
 }
@@ -238,7 +246,7 @@ fn util_disseminate_new_events(events: List(PubsubEvent), state: State) {
 fn handle_new_events(
   state: State,
   node_id: String,
-  new_events: List(PubsubEvent),
+  new_events: List(Event),
 ) -> actor.Next(State, Message) {
   // let new_buckets =
   //   dict.upsert(state.event_buckets, node_id, fn(existing) {
@@ -260,17 +268,10 @@ fn handle_new_events(
   //     }
   //   })
 
-  let inserted_events =
-    channel_datastore.write_events(
-      state.datastore,
-      node_id,
-      list.map(new_events, event_from_pubsub_event),
-    )
+  let #(store, state) = ensure_store(state, node_id)
+  let inserted_events = event_store.write(store, new_events)
 
-  util_disseminate_new_events(
-    list.map(inserted_events, pubsub_event_from_event),
-    state,
-  )
+  util_disseminate_new_events(inserted_events, state)
 
   actor.continue(state)
 }
@@ -278,26 +279,35 @@ fn handle_new_events(
 fn handle_publish_event(
   state: State,
   event: String,
-  recv: process.Subject(PubsubEvent),
+  recv: process.Subject(Event),
 ) -> actor.Next(State, Message) {
   let #(self_node, other_nodes) =
     process.call(state.swim, 1000, swim.GetClusterView)
+
   // let existing_sequence =
   //   dict.get(state.event_buckets, self_node.id)
   //   |> result.unwrap([])
   //   |> list.first()
   //   |> result.map(fn(event) { event.sequence_id })
   //   |> result.unwrap(0)
-  let existing_sequence =
-    channel_datastore.get_latest_event(state.datastore, self_node.id)
-    |> option.map(fn(event) { event.time })
-    |> option.unwrap(0)
-  let next_sequence =
+
+  // let existing_sequence =
+  //   channel_datastore.get_latest_event(state.datastore, self_node.id)
+  //   |> option.map(fn(event) { event.time })
+  //   |> option.unwrap(0)
+
+  let #(store, state) = ensure_store(state, self_node.id)
+  let existing_time =
+    event_store.get_latest(store)
+    |> result.map(fn(event) { event.time })
+    |> result.unwrap(0)
+
+  let next_time =
     timestamp.system_time()
     |> timestamp.to_unix_seconds()
     |> float.round
-    |> int.max(existing_sequence + 1)
-  let pubsub_event = PubsubEvent(sequence_id: next_sequence, data: event)
+    |> int.max(existing_time + 1)
+  let pubsub_event = event_store.Event(time: next_time, data: event)
 
   // let new_buckets =
   //   dict.upsert(state.event_buckets, self_node.id, fn(existing) {
@@ -307,9 +317,11 @@ fn handle_publish_event(
   //     }
   //   })
 
-  channel_datastore.write_events(state.datastore, self_node.id, [
-    event_from_pubsub_event(pubsub_event),
-  ])
+  // channel_datastore.write_events(state.datastore, self_node.id, [
+  //   event_from_pubsub_event(pubsub_event),
+  // ])
+
+  let _ = event_store.write(store, [pubsub_event])
 
   set.each(state.subscribers, process.send(_, pubsub_event))
 
@@ -321,7 +333,7 @@ fn handle_publish_event(
           target.address,
           state.cluster_secret,
           state.channel_name,
-          dict.from_list([#(self_node.id, next_sequence)]),
+          dict.from_list([#(self_node.id, next_time)]),
           self_node.id,
         )
       })
@@ -335,7 +347,7 @@ fn handle_publish_event(
 
 fn handle_subscribe(
   state: State,
-  receiver: process.Subject(PubsubEvent),
+  receiver: process.Subject(Event),
   replay_from: option.Option(Int),
 ) {
   // case replay_from {
@@ -352,13 +364,19 @@ fn handle_subscribe(
   case replay_from {
     option.None -> Nil
     option.Some(replay_from) -> {
-      channel_datastore.get_buckets(state.datastore)
-      |> list.map(fn(node_id) {
-        channel_datastore.get_events_past(state.datastore, node_id, replay_from)
-      })
+      // channel_datastore.get_buckets(state.datastore)
+      // |> list.map(fn(node_id) {
+      //   channel_datastore.get_events_past(state.datastore, node_id, replay_from)
+      // })
+      // |> list.interleave
+      // |> list.sort(fn(a, b) { int.compare(a.time, b.time) })
+      // |> list.map(pubsub_event_from_event)
+      // |> list.each(process.send(receiver, _))
+
+      dict.values(state.store)
+      |> list.map(event_store.get_from(_, replay_from))
       |> list.interleave
-      |> list.sort(fn(a, b) { int.compare(a.time, b.time) })
-      |> list.map(pubsub_event_from_event)
+      |> list.sort(fn(e1, e2) { int.compare(e1.time, e2.time) })
       |> list.each(process.send(receiver, _))
     }
   }
@@ -367,7 +385,7 @@ fn handle_subscribe(
   actor.continue(State(..state, subscribers:))
 }
 
-fn handle_unsubscribe(state: State, receiver: process.Subject(PubsubEvent)) {
+fn handle_unsubscribe(state: State, receiver: process.Subject(Event)) {
   let subscribers = set.delete(state.subscribers, receiver)
   actor.continue(State(..state, subscribers:))
 }
@@ -503,16 +521,16 @@ fn send_announce_sequence(
 }
 
 type SequenceResponse {
-  SequenceResponse(events: List(PubsubEvent))
+  SequenceResponse(events: List(Event))
 }
 
 fn encode_sequence_response(response: SequenceResponse) -> json.Json {
-  json.array(response.events, encode_pubsub_event)
+  json.array(response.events, event_store.encode_event)
 }
 
 fn decode_sequence_response() -> decode.Decoder(SequenceResponse) {
   {
-    use events <- decode.then(decode.list(decode_pubsub_event()))
+    use events <- decode.then(decode.list(event_store.decode_event()))
 
     decode.success(SequenceResponse(events:))
   }
@@ -530,10 +548,14 @@ fn handle_request_sequence(
   //   |> list.take_while(fn(event) { event.sequence_id > from_seq })
   //   |> SequenceResponse
 
+  // let sequence_response =
+  //   channel_datastore.get_events_past(state.datastore, for_node, from_seq)
+  //   |> list.map(pubsub_event_from_event)
+  //   |> SequenceResponse
+
+  let #(store, state) = ensure_store(state, for_node)
   let sequence_response =
-    channel_datastore.get_events_past(state.datastore, for_node, from_seq)
-    |> list.map(pubsub_event_from_event)
-    |> SequenceResponse
+    event_store.get_from(store, from_seq) |> SequenceResponse
 
   let data =
     encode_sequence_response(sequence_response)

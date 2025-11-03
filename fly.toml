@@ -32,4 +32,7 @@ swap_size_mb = 512
 [mounts]
   source = "joblot_data"
   destination = "/data"
-  initial_size = "1gb"
+  initial_size = 1
+  auto_extend_size_threshold = 80
+  auto_extend_size_increment = "1GB"
+  auto_extend_size_limit = "5GB"

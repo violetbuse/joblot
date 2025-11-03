@@ -8,7 +8,7 @@ import gleam/int
 import gleam/json
 import gleam/option
 import gleam/result
-import joblot/channel
+import joblot/event_store.{type Event}
 import joblot/pubsub
 import joblot/subscriber
 import joblot/util
@@ -39,7 +39,7 @@ fn handle_publish(
     Ok(text) -> {
       let body =
         pubsub.publish(pubsub, channel_name, text)
-        |> channel.encode_pubsub_event
+        |> event_store.encode_event
         |> json.to_string_tree
         |> bytes_tree.from_string_tree
         |> mist.Bytes
@@ -85,7 +85,7 @@ type ChannelSocketState {
 }
 
 type ChannelSocketMessage {
-  IncomingEvent(subscriber.Event)
+  IncomingEvent(Event)
 }
 
 fn channel_websocket_initializer(
@@ -159,7 +159,7 @@ fn handle_websocket_custom_message(
 
 fn channel_websocket_handle_incoming_event(
   state: ChannelSocketState,
-  event: subscriber.Event,
+  event: Event,
   conn: mist.WebsocketConnection,
 ) -> mist.Next(ChannelSocketState, ChannelSocketMessage) {
   let data =

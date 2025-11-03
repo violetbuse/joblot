@@ -11,6 +11,7 @@ import gleam/otp/factory_supervisor
 import gleam/otp/supervision
 import gleam/result
 import joblot/channel
+import joblot/event_store.{type Event}
 import joblot/swim
 import mist
 import simplifile
@@ -229,7 +230,7 @@ pub fn publish(
 pub fn subscribe(
   pubsub: process.Subject(Message),
   channel name: String,
-  receive to: process.Subject(channel.PubsubEvent),
+  receive to: process.Subject(Event),
   replay from: option.Option(Int),
 ) {
   process.call(pubsub, 1000, GetChannel(name, _))
@@ -239,7 +240,7 @@ pub fn subscribe(
 pub fn unsubscribe(
   pubsub: process.Subject(Message),
   channel name: String,
-  receiver recv: process.Subject(channel.PubsubEvent),
+  receiver recv: process.Subject(Event),
 ) {
   process.call(pubsub, 1000, GetChannel(name, _))
   |> process.send(channel.Unsubscribe(recv))
