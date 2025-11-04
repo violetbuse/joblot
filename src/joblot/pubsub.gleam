@@ -5,6 +5,7 @@ import gleam/erlang/process
 import gleam/http/request
 import gleam/http/response
 import gleam/json
+import gleam/list
 import gleam/option
 import gleam/otp/actor
 import gleam/otp/factory_supervisor
@@ -66,6 +67,14 @@ fn initialize(
   let register_channel = process.new_subject()
 
   let assert Ok(_) = simplifile.create_directory_all(config.data_dir)
+    as "could not create pubsub directory"
+  let assert Ok(channels) = simplifile.read_directory(config.data_dir)
+
+  process.spawn_unlinked(fn() {
+    list.each(channels, fn(channel_name) {
+      process.send(self, GetChannel(channel_name, process.new_subject()))
+    })
+  })
 
   let assert Ok(factory_supervisor) =
     factory_supervisor.worker_child(fn(channel_id) {

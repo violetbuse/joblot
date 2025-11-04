@@ -19,6 +19,7 @@ import gleam/string
 import gleam/time/duration
 import gleam/time/timestamp
 import gleam/uri
+import joblot/swim_store.{type NodeInfo, Alive, Dead, NodeInfo, Suspect}
 import joblot/util
 import mist
 
@@ -33,6 +34,7 @@ pub type SwimConfig {
     secret: String,
     region: String,
     shard_count: Int,
+    datafile: String,
   )
 }
 
@@ -63,28 +65,11 @@ type State {
   State(
     subject: process.Subject(Message),
     self: NodeInfo,
-    nodes: dict.Dict(String, NodeInfo),
+    store: swim_store.SwimStore,
     node_stats: dict.Dict(String, NodeStats),
     cluster_secret: String,
     bootstrap_addresses: List(uri.Uri),
   )
-}
-
-pub type NodeInfo {
-  NodeInfo(
-    version: Int,
-    state: NodeState,
-    id: String,
-    address: uri.Uri,
-    region: String,
-    shard_count: Int,
-  )
-}
-
-pub type NodeState {
-  Alive
-  Suspect
-  Dead
 }
 
 pub fn compare_node(a: NodeInfo, b: NodeInfo) -> order.Order {
@@ -102,15 +87,6 @@ pub fn compare_node(a: NodeInfo, b: NodeInfo) -> order.Order {
 
   let name_order = string.compare(a.id, b.id)
   order.break_tie(state_order, name_order)
-}
-
-fn degrade_state(node: NodeInfo) -> NodeInfo {
-  let new_state = case node.state {
-    Alive -> Suspect
-    existing -> existing
-  }
-
-  NodeInfo(..node, state: new_state)
 }
 
 pub fn is_alive(node: NodeInfo) -> Bool {
@@ -205,6 +181,8 @@ fn initialize(
 ) -> Result(actor.Initialised(State, Message, Nil), String) {
   process.send(self, Heartbeat)
 
+  let assert Ok(datastore) = swim_store.start(config.datafile)
+
   actor.initialised(State(
     subject: self,
     self: NodeInfo(
@@ -215,7 +193,7 @@ fn initialize(
       region: config.region,
       shard_count: config.shard_count,
     ),
-    nodes: dict.new(),
+    store: datastore,
     node_stats: dict.new(),
     cluster_secret: config.secret,
     bootstrap_addresses: config.bootstrap_addresses,
@@ -255,7 +233,7 @@ fn handle_heartbeat(state: State) -> actor.Next(State, Message) {
 
 fn heartbeat_sync(state: State) {
   process.spawn(fn() {
-    let nodelist = dict.values(state.nodes)
+    let nodelist = swim_store.get_nodes(state.store)
 
     let alive_nodes = list.filter(nodelist, is_alive) |> list.sample(3)
     let sus_nodes =
@@ -275,7 +253,7 @@ fn heartbeat_sync(state: State) {
             candidate.address,
             state.cluster_secret,
             state.self,
-            state.nodes |> dict.values |> list.sample(10),
+            swim_store.get_nodes(state.store) |> list.sample(10),
           )
 
         let end = timestamp.system_time()
@@ -312,7 +290,7 @@ fn try_bootstrap(state: State) {
     }
 
     let already_connected_nodes =
-      [state.self, ..dict.values(state.nodes)]
+      [state.self, ..swim_store.get_nodes(state.store)]
       |> list.map(fn(node) { stringify_addr(node.address) })
 
     let not_connected_bootstrap_nodes =
@@ -329,7 +307,7 @@ fn try_bootstrap(state: State) {
           address,
           state.cluster_secret,
           state.self,
-          state.nodes |> dict.values |> list.sample(10),
+          swim_store.get_nodes(state.store) |> list.sample(10),
         )
 
       case result {
@@ -352,19 +330,9 @@ fn handle_info(state: State, info: NodeInfo) -> actor.Next(State, Message) {
     return: actor.continue(state),
   )
 
-  actor.continue(
-    State(
-      ..state,
-      nodes: dict.upsert(state.nodes, info.id, fn(existing) {
-        case existing {
-          option.None -> info
-          option.Some(existing_node) if existing_node.version < info.version ->
-            info
-          option.Some(existing_node) -> existing_node
-        }
-      }),
-    ),
-  )
+  swim_store.update(state.store, info)
+
+  actor.continue(state)
 }
 
 fn handle_self_info(state: State, info: NodeInfo) -> actor.Next(State, Message) {
@@ -373,20 +341,10 @@ fn handle_self_info(state: State, info: NodeInfo) -> actor.Next(State, Message) 
     return: actor.continue(state),
   )
 
-  actor.continue(
-    State(
-      ..state,
-      nodes: dict.upsert(state.nodes, info.id, fn(existing) {
-        case existing {
-          option.None -> info
-          option.Some(existing_node)
-            if existing_node != info && existing_node.version <= info.version
-          -> info
-          option.Some(existing_node) -> existing_node
-        }
-      }),
-    ),
-  )
+  swim_store.update(state.store, info)
+  swim_store.set_last_online(state.store, info.id)
+
+  actor.continue(state)
 }
 
 fn handle_you_info(state: State, info: NodeInfo) -> actor.Next(State, Message) {
@@ -424,18 +382,27 @@ fn handle_failed_sync(
 ) -> actor.Next(State, Message) {
   io.println_error("sync with " <> node_id <> " failed, handling.")
 
-  let new_nodes = case dict.get(state.nodes, node_id) {
-    Error(_) -> state.nodes
-    Ok(node) -> dict.insert(state.nodes, node_id, degrade_state(node))
-  }
+  // let new_nodes = case dict.get(state.nodes, node_id) {
+  //   Error(_) -> state.nodes
+  //   Ok(node) -> dict.insert(state.nodes, node_id, degrade_state(node))
+  // }
+  let _ =
+    swim_store.get_node(state.store, node_id)
+    |> result.map(fn(node) {
+      case node.state {
+        Alive -> swim_store.set_state(state.store, node_id, Suspect)
+        Suspect -> swim_store.set_state(state.store, node_id, Dead)
+        Dead -> Nil
+      }
+    })
 
   process.spawn(fn() {
     let random_alive_node =
-      dict.values(state.nodes)
+      swim_store.get_nodes(state.store)
       |> list.filter(is_alive)
       |> list.sample(1)
       |> list.first
-    case dict.get(state.nodes, node_id), random_alive_node {
+    case swim_store.get_node(state.store, node_id), random_alive_node {
       Error(_), _ -> Nil
       Ok(_), Error(_) -> {
         process.send(state.subject, MarkDead(node_id:))
@@ -460,20 +427,15 @@ fn handle_failed_sync(
     }
   })
 
-  actor.continue(State(..state, nodes: new_nodes))
+  actor.continue(state)
 }
 
 fn handle_mark_dead(state: State, node_id: String) -> actor.Next(State, Message) {
-  let new_nodes = case dict.get(state.nodes, node_id) {
-    Error(_) -> state.nodes
-    Ok(node) if node.state == Dead -> state.nodes
-    Ok(node) ->
-      dict.insert(
-        state.nodes,
-        node_id,
-        NodeInfo(..node, state: Dead, version: node.version + 1),
-      )
-  }
+  use <- bool.guard(
+    when: state.self.id == node_id,
+    return: actor.continue(state),
+  )
+  swim_store.set_state(state.store, node_id, Dead)
 
   let new_stats =
     dict.upsert(state.node_stats, node_id, fn(stats) {
@@ -487,25 +449,21 @@ fn handle_mark_dead(state: State, node_id: String) -> actor.Next(State, Message)
       }
     })
 
-  actor.continue(State(..state, nodes: new_nodes, node_stats: new_stats))
+  actor.continue(State(..state, node_stats: new_stats))
 }
 
 fn handle_mark_alive(
   state: State,
   node_id: String,
 ) -> actor.Next(State, Message) {
-  let new_nodes = case dict.get(state.nodes, node_id) {
-    Error(_) -> state.nodes
-    Ok(node) if node.state == Alive -> state.nodes
-    Ok(node) ->
-      dict.insert(
-        state.nodes,
-        node_id,
-        NodeInfo(..node, state: Alive, version: node.version + 1),
-      )
-  }
+  use <- bool.guard(
+    when: state.self.id == node_id,
+    return: actor.continue(state),
+  )
 
-  actor.continue(State(..state, nodes: new_nodes))
+  swim_store.set_alive_without_version_increment(state.store, node_id)
+
+  actor.continue(state)
 }
 
 fn handle_node_latency(
@@ -541,7 +499,7 @@ fn handle_get_cluster_view(
   state: State,
   recv: process.Subject(#(NodeInfo, List(NodeInfo))),
 ) -> actor.Next(State, Message) {
-  process.send(recv, #(state.self, dict.values(state.nodes)))
+  process.send(recv, #(state.self, swim_store.get_nodes(state.store)))
   actor.continue(state)
 }
 
@@ -558,7 +516,9 @@ fn handle_get_node_info(
   node_id: String,
   recv: process.Subject(option.Option(NodeInfo)),
 ) -> actor.Next(State, Message) {
-  dict.get(state.nodes, node_id) |> option.from_result |> process.send(recv, _)
+  swim_store.get_node(state.store, node_id)
+  |> option.from_result
+  |> process.send(recv, _)
   actor.continue(state)
 }
 
@@ -578,8 +538,9 @@ fn handle_get_closest_nodes(
   node_ids: List(String),
   recv: process.Subject(List(NodeInfo)),
 ) -> actor.Next(State, Message) {
-  dict.filter(state.nodes, fn(id, _) { list.contains(node_ids, id) })
-  |> dict.values
+  list.filter(swim_store.get_nodes(state.store), fn(node) {
+    list.contains(node_ids, node.id)
+  })
   |> list.filter_map(fn(node) {
     case dict.get(state.node_stats, node.id) {
       Error(_) -> Error(Nil)
@@ -710,9 +671,9 @@ fn handle_sync_request(
   process.send(state.subject, SelfInfo(self))
   list.each(subset, fn(node) { process.send(state.subject, Info(node)) })
 
-  let you = dict.get(state.nodes, self.id) |> result.unwrap(self)
+  let you = swim_store.get_node(state.store, self.id) |> result.unwrap(self)
   let self = state.self
-  let subset = dict.values(state.nodes) |> list.sample(5)
+  let subset = swim_store.get_nodes(state.store) |> list.sample(5)
 
   let response_bytes =
     SyncResponse(self:, you:, subset:)

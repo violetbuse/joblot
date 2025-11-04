@@ -28,6 +28,7 @@ pub type Config {
     db_url: String,
     db_pool_size: Int,
     swim_name: process.Name(swim.Message),
+    swim_datafile: String,
     pubsub_name: process.Name(pubsub.Message),
     pubsub_dir: String,
     shards: List(Shard),
@@ -84,6 +85,7 @@ pub fn create_config(shard_count: Int) -> Config {
   let pubsub_name = process.new_name("pubsub")
 
   let assert Ok(data_dir) = env.get_string("DATA_DIR")
+  let swim_datafile = filepath.join(data_dir, "swim.db")
   let pubsub_dir = filepath.join(data_dir, "/pubsub")
 
   Config(
@@ -99,6 +101,7 @@ pub fn create_config(shard_count: Int) -> Config {
     db_url:,
     db_pool_size:,
     swim_name:,
+    swim_datafile:,
     pubsub_name:,
     pubsub_dir:,
     shards: list.range(from: 1, to: shard_count)
@@ -129,6 +132,7 @@ fn swim_config(config: Config) -> swim.SwimConfig {
     bootstrap_addresses: config.bootstrap_addresses,
     region: config.region,
     shard_count: config.shards |> list.length,
+    datafile: config.swim_datafile,
   )
 }
 
