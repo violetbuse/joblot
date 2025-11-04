@@ -15,12 +15,14 @@ import gleam/option
 import gleam/otp/actor
 import gleam/result
 import gleam/set
+import gleam/string
 import gleam/time/timestamp
 import gleam/uri
 import joblot/event_store.{type Event, type EventStore}
 import joblot/swim
 import joblot/util
 import mist
+import simplifile
 
 const heartbeat_interval = 30_000
 
@@ -59,17 +61,33 @@ type State {
   )
 }
 
+fn start_store(datadir: String, node_id: String) -> Result(EventStore, Nil) {
+  filepath.join(datadir, node_id <> ".events.db")
+  |> event_store.start
+}
+
+fn get_stores(data_dir: String) -> Result(dict.Dict(String, EventStore), Nil) {
+  use read_result <- result.try(
+    simplifile.read_directory(data_dir) |> result.replace_error(Nil),
+  )
+
+  list.filter(read_result, string.ends_with(_, ".events.db"))
+  |> list.map(string.replace(_, ".events.db", ""))
+  |> list.try_map(fn(node_id) {
+    case start_store(data_dir, node_id) {
+      Ok(store) -> Ok(#(node_id, store))
+      Error(_) -> Error(Nil)
+    }
+  })
+  |> result.map(dict.from_list)
+}
+
 fn ensure_store(state: State, node_id: String) -> #(EventStore, State) {
   let new_dict =
     dict.upsert(state.store, node_id, fn(existing) {
       case existing {
         option.None ->
-          case
-            event_store.start(filepath.join(
-              state.data_dir,
-              node_id <> ".events.db",
-            ))
-          {
+          case start_store(state.data_dir, node_id) {
             Ok(store) -> store
             Error(err) -> {
               echo err
@@ -90,12 +108,17 @@ fn initialize(
 ) -> Result(actor.Initialised(State, Message, process.Subject(Message)), String) {
   process.send(self, Heartbeat)
 
+  use stores <- result.try(
+    get_stores(config.data_dir)
+    |> result.replace_error("Could not start stores from existing data dir."),
+  )
+
   let state =
     State(
       channel_name: config.channel_name,
       subject: self,
       swim: config.swim,
-      store: dict.new(),
+      store: stores,
       cluster_secret: config.cluster_secret,
       subscribers: set.new(),
       data_dir: config.data_dir,

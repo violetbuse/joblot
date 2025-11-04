@@ -1,9 +1,11 @@
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/float
 import gleam/json
 import gleam/list
 import gleam/otp/actor
 import gleam/result
+import gleam/time/timestamp
 import joblot/util
 import sqlight
 
@@ -37,6 +39,7 @@ pub opaque type Message {
   GetFrom(from: Int, recv: process.Subject(List(Event)))
   GetBetween(from: Int, to: Int, recv: process.Subject(List(Event)))
   Write(events: List(Event), recv: process.Subject(List(Event)))
+  PeriodicCleanup(self: process.Subject(Message))
 }
 
 type State {
@@ -87,6 +90,8 @@ fn initialize(
     |> result.replace_error("could not run migrations"),
   )
 
+  process.send(self, PeriodicCleanup(self))
+
   actor.initialised(State(db:))
   |> actor.returning(EventStore(self))
   |> Ok
@@ -99,6 +104,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
     GetLatest(recv:) -> handle_get_latest(state, recv)
     GetBetween(from:, to:, recv:) -> handle_get_between(state, from, to, recv)
     Write(events:, recv:) -> handle_write(state, events, recv)
+    PeriodicCleanup(self:) -> handle_periodic_cleanup(state, self)
   }
 }
 
@@ -283,6 +289,39 @@ fn handle_write(
       actor.continue(state)
     }
   }
+}
+
+// ten minutes
+const cleanup_interval = 60_000
+
+fn handle_periodic_cleanup(
+  state: State,
+  self: process.Subject(Message),
+) -> actor.Next(State, Message) {
+  let assert Ok(_) = {
+    // 14 days x 24 hours x 60 minutes x 60 seconds
+    let retention_length = 14 * 24 * 60 * 60
+    let current_time =
+      timestamp.system_time() |> timestamp.to_unix_seconds() |> float.round
+    let delete_before = current_time - retention_length
+
+    let sql =
+      "
+      DELETE FROM events
+      WHERE time < ? AND time NOT IN (
+        SELECT time FROM events
+        ORDER BY time DESC
+        LIMIT 200
+      );
+    "
+
+    sqlight.query(sql, state.db, [sqlight.int(delete_before)], decode.dynamic)
+  }
+    as "could not delete old events"
+
+  process.send_after(self, cleanup_interval, PeriodicCleanup(self))
+
+  actor.continue(state)
 }
 
 pub fn start(datafile: String) -> Result(EventStore, Nil) {
