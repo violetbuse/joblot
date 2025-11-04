@@ -250,8 +250,8 @@ fn handle_periodic_cleanup(
   self: process.Subject(Message),
 ) -> actor.Next(State, Message) {
   let assert Ok(_) = {
-    // 14 days x 24 hours x 60 minutes x 60 seconds
-    let retention_length = 14 * 24 * 60 * 60
+    // 31 days x 24 hours x 60 minutes x 60 seconds
+    let retention_length = 31 * 24 * 60 * 60
     let current_time =
       timestamp.system_time() |> timestamp.to_unix_seconds() |> float.round
     let delete_before = current_time - retention_length
@@ -262,7 +262,7 @@ fn handle_periodic_cleanup(
       WHERE time < ? AND time NOT IN (
         SELECT time FROM events
         ORDER BY time DESC
-        LIMIT 200
+        LIMIT 500
       );
     "
 

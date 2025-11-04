@@ -49,6 +49,7 @@ pub opaque type Message {
   SetAliveWithoutVersionIncrement(node_id: String)
   Update(node_info: NodeInfo)
   IncreaseVersionTo(node_id: String, new_version: Int)
+  Cleanup(self: process.Subject(Message))
 }
 
 type State {
@@ -72,6 +73,8 @@ fn initialize(
   datafile: String,
 ) -> Result(actor.Initialised(State, Message, SwimStore), String) {
   use db <- util.with_connection(datafile, migrations)
+
+  process.send(self, Cleanup(self))
 
   actor.initialised(State(db:))
   |> actor.returning(SwimStore(self))
@@ -129,13 +132,18 @@ fn internal_get_node(
 fn internal_get_nodes(
   db: sqlight.Connection,
 ) -> Result(List(NodeInfo), sqlight.Error) {
+  let now = timestamp.system_time() |> timestamp.to_unix_seconds |> float.round
+  let one_week = 7 * 24 * 60 * 60
+  let one_week_ago = now - one_week
+
   let sql =
     "
   SELECT id, version, state, address, region, shard_count
-  FROM nodes;
+  FROM nodes 
+  WHERE last_online > ?;
   "
 
-  sqlight.query(sql, db, [], node_decoder())
+  sqlight.query(sql, db, [sqlight.int(one_week_ago)], node_decoder())
   |> util.log_error("error fetching node from sqlite")
 }
 
@@ -151,6 +159,7 @@ fn handle_message(state: State, message: Message) -> actor.Next(State, Message) 
     Update(node_info:) -> handle_update(state, node_info)
     IncreaseVersionTo(node_id:, new_version:) ->
       handle_increase_version_to(state, node_id, new_version)
+    Cleanup(self:) -> handle_cleanup(state, self)
   }
 }
 
@@ -302,6 +311,30 @@ fn handle_increase_version_to(
       decode.dynamic,
     )
     as "could not set new version for node"
+
+  actor.continue(state)
+}
+
+fn handle_cleanup(
+  state: State,
+  self: process.Subject(Message),
+) -> actor.Next(State, Message) {
+  // 24 hours x 60 mins x 60 seconds x 1000 ms
+  let next_cleanup_time = 24 * 60 * 60 * 1000
+  process.send_after(self, next_cleanup_time, Cleanup(self))
+
+  let now = timestamp.system_time() |> timestamp.to_unix_seconds |> float.round
+  let nine_days = 9 * 24 * 60 * 60
+  let older_than = now - nine_days
+
+  let sql =
+    "
+  DELETE FROM nodes
+  WHERE last_online < ?;
+  "
+
+  let assert Ok(_) =
+    sqlight.query(sql, state.db, [sqlight.int(older_than)], decode.dynamic)
 
   actor.continue(state)
 }

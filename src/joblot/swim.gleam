@@ -267,8 +267,8 @@ fn heartbeat_sync(state: State) {
           Error(_) -> process.send(state.subject, FailedSync(candidate.id))
           Ok(sync_response) -> {
             process.send(state.subject, RegisterLatency(candidate.id, latency:))
-            process.send(state.subject, MarkAlive(sync_response.self.id))
             process.send(state.subject, SelfInfo(sync_response.self))
+            process.send(state.subject, MarkAlive(sync_response.self.id))
             process.send(state.subject, YouInfo(sync_response.you))
             list.each(sync_response.subset, fn(node) {
               process.send(state.subject, Info(node))
