@@ -46,49 +46,18 @@ type State {
   State(db: sqlight.Connection)
 }
 
-fn with_pragma(
-  value: String,
-  connection: sqlight.Connection,
-  cb: fn() -> Result(a, String),
-) -> Result(a, String) {
-  use _ <- result.try(
-    sqlight.exec("PRAGMA " <> value <> ";", connection)
-    |> result.replace_error("Could not set pragma: " <> value),
-  )
-
-  cb()
-}
+const migrations = [
+  "CREATE TABLE IF NOT EXISTS events (
+    time INTEGER NOT NULL PRIMARY KEY,
+    data TEXT NOT NULL
+  ) STRICT;",
+]
 
 fn initialize(
   self: process.Subject(Message),
   datafile: String,
 ) -> Result(actor.Initialised(State, Message, EventStore), String) {
-  use db <- result.try(
-    sqlight.open(datafile)
-    |> util.log_error("Could not open data file " <> datafile)
-    |> result.replace_error("Could not open sqlite file " <> datafile),
-  )
-
-  use <- with_pragma("journal_mode = WAL", db)
-  use <- with_pragma("busy_timeout = 5000", db)
-  use <- with_pragma("synchronous = NORMAL", db)
-  use <- with_pragma("cache_size = 1000000000", db)
-  use <- with_pragma("foreign_keys = true", db)
-  use <- with_pragma("temp_store = memory", db)
-
-  use _ <- result.try(
-    sqlight.exec(
-      "
-    CREATE TABLE IF NOT EXISTS events (
-      time INTEGER PRIMARY KEY,
-      data TEXT
-    ) STRICT;
-    ",
-      db,
-    )
-    |> util.log_error("error running migrations")
-    |> result.replace_error("could not run migrations"),
-  )
+  use db <- util.with_connection(datafile, migrations)
 
   process.send(self, PeriodicCleanup(self))
 
@@ -211,31 +180,13 @@ fn handle_get_between(
   actor.continue(state)
 }
 
-fn with_transaction(
-  db: sqlight.Connection,
-  cb: fn(sqlight.Connection) -> Result(a, sqlight.Error),
-) -> Result(a, sqlight.Error) {
-  use _ <- result.try(sqlight.exec("BEGIN IMMEDIATE TRANSACTION;", db))
-
-  case cb(db) {
-    Ok(result) -> {
-      use _ <- result.try(sqlight.exec("COMMIT TRANSACTION;", db))
-      Ok(result)
-    }
-    Error(error) -> {
-      let assert Ok(_) = sqlight.exec("ROLLBACK TRANSACTION;", db)
-      Error(error)
-    }
-  }
-}
-
 fn handle_write(
   state: State,
   events: List(Event),
   recv: process.Subject(List(Event)),
 ) -> actor.Next(State, Message) {
   let result_set = {
-    use db <- with_transaction(state.db)
+    use db <- util.with_transaction(state.db)
 
     let decoder = {
       use time <- decode.field(0, decode.int)
